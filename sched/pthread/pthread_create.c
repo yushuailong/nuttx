@@ -346,6 +346,15 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
           goto errout_with_tcb;
         }
 
+      /* Verify that the low priority is in the valid range */
+
+      if (param.sched_ss_low_priority < SCHED_PRIORITY_MIN ||
+          param.sched_ss_low_priority > SCHED_PRIORITY_MAX)
+        {
+          errcode = EINVAL;
+          goto errout_with_tcb;
+        }
+
       /* Initialize the sporadic policy */
 
       ret = nxsched_initialize_sporadic(ptcb);

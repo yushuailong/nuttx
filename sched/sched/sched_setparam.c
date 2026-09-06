@@ -59,7 +59,9 @@ int set_sporadic_param(FAR const struct sched_param *param,
       clock_t budget_ticks;
 
       if (param->sched_ss_max_repl >= 1 &&
-          param->sched_ss_max_repl <= CONFIG_SCHED_SPORADIC_MAXREPL)
+          param->sched_ss_max_repl <= CONFIG_SCHED_SPORADIC_MAXREPL &&
+          param->sched_ss_low_priority >= SCHED_PRIORITY_MIN &&
+          param->sched_ss_low_priority <= SCHED_PRIORITY_MAX)
         {
           /* Convert timespec values to system clock ticks */
 

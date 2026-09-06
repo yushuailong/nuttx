@@ -230,8 +230,20 @@ int spawn_execattrs(pid_t pid, FAR const posix_spawnattr_t *attr)
       param.sched_ss_repl_period.tv_nsec = attr->repl_period.tv_nsec;
       param.sched_ss_init_budget.tv_sec  = attr->budget.tv_sec;
       param.sched_ss_init_budget.tv_nsec = attr->budget.tv_nsec;
+
+      /* Verify that the low priority is in the valid range */
+
+      if (attr->policy == SCHED_SPORADIC &&
+          (param.sched_ss_low_priority < SCHED_PRIORITY_MIN ||
+           param.sched_ss_low_priority > SCHED_PRIORITY_MAX))
+        {
+          ret = -EINVAL;
+        }
+      else
 #endif
-      nxsched_set_scheduler(pid, attr->policy, &param);
+        {
+          nxsched_set_scheduler(pid, attr->policy, &param);
+        }
     }
 
   return ret;
