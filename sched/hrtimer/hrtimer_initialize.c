@@ -32,13 +32,12 @@
  * Public Data
  ****************************************************************************/
 
-/* Array of pointers to currently running high-resolution timers
- * for each CPU in SMP configurations. Index corresponds to CPU ID.
+/* Array of pointers to currently running high-resolution timers.
+ * The single-CPU configuration uses the first entry to preserve callback
+ * state while interrupts are enabled.
  */
 
-#ifdef CONFIG_SMP
 uintptr_t g_hrtimer_running[CONFIG_SMP_NCPUS];
-#endif
 
 /* Global spinlock protecting the high-resolution timer subsystem.
  *

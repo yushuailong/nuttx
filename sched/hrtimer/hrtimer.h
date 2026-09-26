@@ -92,13 +92,11 @@ extern struct FAR hrtimer_s *g_hrtimer_head;
 extern struct list_node g_hrtimer_list;
 #endif
 
-/* Array of pointers to currently running high-resolution timers
- * for each CPU in SMP configurations. Index corresponds to CPU ID.
+/* Array of pointers to currently running high-resolution timers.
+ * Index corresponds to CPU ID.
  */
 
-#ifdef CONFIG_SMP
 extern uintptr_t g_hrtimer_running[CONFIG_SMP_NCPUS];
-#endif
 
 /****************************************************************************
  * Public Function Prototypes
@@ -408,12 +406,8 @@ uint32_t hrtimer_read_32(FAR const uint32_t *ptr)
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SMP
-#  define hrtimer_mark_running(timer, cpu) \
+#define hrtimer_mark_running(timer, cpu) \
   (g_hrtimer_running[cpu] = (uintptr_t)(timer))
-#else
-#  define hrtimer_mark_running(timer, cpu) UNUSED(cpu)
-#endif
 #define hrtimer_unmark_running(cpu) hrtimer_mark_running(NULL, cpu)
 
 /****************************************************************************
@@ -431,12 +425,8 @@ uint32_t hrtimer_read_32(FAR const uint32_t *ptr)
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SMP
-#  define hrtimer_is_running(timer, cpu) \
+#define hrtimer_is_running(timer, cpu) \
   (hrtimer_read(&g_hrtimer_running[cpu]) == (uintptr_t)(timer))
-#else
-#  define hrtimer_is_running(timer, cpu) (true)
-#endif
 #define hrtimer_is_cancelling(timer, cpu) \
   hrtimer_is_running((uintptr_t)(timer) | 0x1u, cpu)
 
@@ -462,7 +452,6 @@ static inline_function
 int hrtimer_cancel_running(FAR hrtimer_t *timer)
 {
   int refs            = 0;
-#ifdef CONFIG_SMP
   uintptr_t cancelled = (uintptr_t)timer | 0x1u;
   int cpu;
 
@@ -492,7 +481,6 @@ int hrtimer_cancel_running(FAR hrtimer_t *timer)
           refs++;
         }
     }
-#endif
 
   return refs;
 }
