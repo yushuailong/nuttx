@@ -74,6 +74,13 @@ struct usr_wqueue_s
   int                     nthreads; /* Number of worker threads */
   bool                    exit;     /* Request worker thread exit */
   bool                    dynamic;  /* Dynamically allocated queue */
+
+  /* Custom queue lifecycle state. */
+
+  struct list_node        registry; /* Entry in custom queue registry */
+  sem_t                   drain;    /* Wait for active API users */
+  unsigned int            refs;     /* Active public API users */
+  bool                    closing;  /* Queue destruction has started */
 };
 
 /****************************************************************************
@@ -83,6 +90,13 @@ struct usr_wqueue_s
 /* The state of the user mode work queue */
 
 extern struct usr_wqueue_s g_usrwork;
+
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
+
+int work_wqueue_acquire(FAR struct usr_wqueue_s *wqueue);
+void work_wqueue_release(FAR struct usr_wqueue_s *wqueue);
 
 /****************************************************************************
  * Inline Functions

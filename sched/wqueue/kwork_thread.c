@@ -76,6 +76,18 @@
 #endif
 
 /****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+/* Custom work queues remain in this registry until all public API users have
+ * left and the queue storage can be released.
+ */
+
+static struct list_node g_wqueue_registry =
+  LIST_INITIAL_VALUE(g_wqueue_registry);
+static spinlock_t g_wqueue_registry_lock = SP_UNLOCKED;
+
+/****************************************************************************
  * Public Data
  ****************************************************************************/
 
@@ -422,6 +434,77 @@ void work_timer_expired(wdparm_t arg)
 }
 
 /****************************************************************************
+ * Name: work_wqueue_acquire
+ *
+ * Description:
+ *   Acquire a lifecycle reference to a custom work queue.  Registry lookup
+ *   validates the handle without dereferencing storage that may already have
+ *   been released.
+ *
+ ****************************************************************************/
+
+int work_wqueue_acquire(FAR struct kwork_wqueue_s *wqueue)
+{
+  FAR struct kwork_wqueue_s *curr;
+  irqstate_t flags;
+  int ret = -EINVAL;
+
+  if (wqueue == NULL)
+    {
+      return -EINVAL;
+    }
+
+  flags = spin_lock_irqsave(&g_wqueue_registry_lock);
+
+  list_for_every_entry(&g_wqueue_registry, curr,
+                       struct kwork_wqueue_s, registry)
+    {
+      if (curr == wqueue)
+        {
+          if (curr->closing)
+            {
+              ret = -ESHUTDOWN;
+            }
+          else
+            {
+              curr->refs++;
+              ret = OK;
+            }
+
+          break;
+        }
+    }
+
+  spin_unlock_irqrestore(&g_wqueue_registry_lock, flags);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: work_wqueue_release
+ *
+ * Description:
+ *   Release a custom work queue lifecycle reference.
+ *
+ ****************************************************************************/
+
+void work_wqueue_release(FAR struct kwork_wqueue_s *wqueue)
+{
+  irqstate_t flags;
+
+  flags = spin_lock_irqsave(&g_wqueue_registry_lock);
+
+  DEBUGASSERT(wqueue->refs > 0);
+  wqueue->refs--;
+
+  if (wqueue->closing && wqueue->refs == 0)
+    {
+      nxsem_post(&wqueue->drain);
+    }
+
+  spin_unlock_irqrestore(&g_wqueue_registry_lock, flags);
+}
+
+/****************************************************************************
  * Name: work_queue_create
  *
  * Description:
@@ -446,6 +529,7 @@ FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
                                              int stack_size, int nthreads)
 {
   FAR struct kwork_wqueue_s *wqueue;
+  irqstate_t flags;
   int ret;
 
   if (name == NULL || stack_size <= 0 || nthreads < 1 ||
@@ -470,6 +554,7 @@ FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
   wqueue->timer.func = NULL;
   nxsem_init(&wqueue->sem, 0, 0);
   nxsem_init(&wqueue->exsem, 0, 0);
+  nxsem_init(&wqueue->drain, 0, 0);
   wqueue->nthreads = nthreads;
   wqueue->dynamic = true;
   spin_lock_init(&wqueue->lock);
@@ -481,9 +566,14 @@ FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
     {
       nxsem_destroy(&wqueue->sem);
       nxsem_destroy(&wqueue->exsem);
+      nxsem_destroy(&wqueue->drain);
       kmm_free(wqueue);
       return NULL;
     }
+
+  flags = spin_lock_irqsave(&g_wqueue_registry_lock);
+  list_add_tail(&g_wqueue_registry, &wqueue->registry);
+  spin_unlock_irqrestore(&g_wqueue_registry_lock, flags);
 
   return wqueue;
 }
@@ -505,16 +595,43 @@ FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
 
 int work_queue_free(FAR struct kwork_wqueue_s *wqueue)
 {
+  FAR struct kwork_wqueue_s *curr;
   FAR struct work_s *work;
   FAR struct work_s *next;
   FAR struct kworker_s *worker;
   irqstate_t flags;
+  irqstate_t qflags;
   pid_t self;
+  unsigned int refs;
+  int ret = -EINVAL;
   int wndx;
 
-  if (wqueue == NULL || !wqueue->dynamic)
+  if (wqueue == NULL)
     {
       return -EINVAL;
+    }
+
+  /* Validate the handle and prevent new public API users from acquiring a
+   * reference.  An API user that acquired a reference before this point is
+   * kept safe until it releases that reference.
+   */
+
+  flags = spin_lock_irqsave(&g_wqueue_registry_lock);
+
+  list_for_every_entry(&g_wqueue_registry, curr,
+                       struct kwork_wqueue_s, registry)
+    {
+      if (curr == wqueue)
+        {
+          ret = curr->closing ? -ESHUTDOWN : OK;
+          break;
+        }
+    }
+
+  if (ret < 0)
+    {
+      spin_unlock_irqrestore(&g_wqueue_registry_lock, flags);
+      return ret;
     }
 
   worker = wq_get_worker(wqueue);
@@ -524,16 +641,19 @@ int work_queue_free(FAR struct kwork_wqueue_s *wqueue)
     {
       if (worker[wndx].pid == self)
         {
+          spin_unlock_irqrestore(&g_wqueue_registry_lock, flags);
           return -EDEADLK;
         }
     }
+
+  wqueue->closing = true;
+  spin_unlock_irqrestore(&g_wqueue_registry_lock, flags);
 
   /* Mark the work queue as exiting and return all queued work structures
    * to their owners before the queue storage is released.
    */
 
-  flags = spin_lock_irqsave_nopreempt(&wqueue->lock);
-
+  qflags = spin_lock_irqsave_nopreempt(&wqueue->lock);
   wqueue->exit = true;
 
   list_for_every_entry_safe(&wqueue->expired, work, next,
@@ -550,13 +670,13 @@ int work_queue_free(FAR struct kwork_wqueue_s *wqueue)
       work->worker = NULL;
     }
 
-  spin_unlock_irqrestore_nopreempt(&wqueue->lock, flags);
+  spin_unlock_irqrestore_nopreempt(&wqueue->lock, qflags);
 
   /* Stop delayed dispatch after new submissions have been disabled. */
 
   wd_cancel(&wqueue->timer);
 
-  /* Queue a exit work for all threads */
+  /* Wake and collect every worker. */
 
   for (wndx = 0; wndx < wqueue->nthreads; wndx++)
     {
@@ -568,6 +688,25 @@ int work_queue_free(FAR struct kwork_wqueue_s *wqueue)
       nxsem_wait_uninterruptible(&wqueue->exsem);
     }
 
+  /* Synchronous cancellation may wake only after a worker completes.  Keep
+   * the queue and its per-worker wait semaphores alive until every public
+   * API user that acquired the queue before shutdown has returned.
+   */
+
+  flags = spin_lock_irqsave(&g_wqueue_registry_lock);
+  refs = wqueue->refs;
+  spin_unlock_irqrestore(&g_wqueue_registry_lock, flags);
+
+  if (refs > 0)
+    {
+      nxsem_wait_uninterruptible(&wqueue->drain);
+    }
+
+  flags = spin_lock_irqsave(&g_wqueue_registry_lock);
+  DEBUGASSERT(wqueue->refs == 0);
+  list_delete(&wqueue->registry);
+  spin_unlock_irqrestore(&g_wqueue_registry_lock, flags);
+
   for (wndx = 0; wndx < wqueue->nthreads; wndx++)
     {
       nxsem_destroy(&worker[wndx].wait);
@@ -575,6 +714,7 @@ int work_queue_free(FAR struct kwork_wqueue_s *wqueue)
 
   nxsem_destroy(&wqueue->sem);
   nxsem_destroy(&wqueue->exsem);
+  nxsem_destroy(&wqueue->drain);
   kmm_free(wqueue);
 
   return OK;
@@ -595,23 +735,17 @@ int work_queue_free(FAR struct kwork_wqueue_s *wqueue)
  *
  ****************************************************************************/
 
-int work_queue_priority_wq(FAR struct kwork_wqueue_s *wqueue)
+static int work_qpriority(FAR struct kwork_wqueue_s *wqueue)
 {
   FAR struct kworker_s *worker;
   FAR struct tcb_s *tcb;
 
-  if (wqueue == NULL)
-    {
-      return -EINVAL;
-    }
-
-  /* Find for the TCB associated with matching PID */
+  /* Find the TCB associated with the first worker PID. */
 
   worker = wq_get_worker(wqueue);
-
   tcb = nxsched_get_tcb(worker[0].pid);
 
-  if (!tcb)
+  if (tcb == NULL)
     {
       return -ESRCH;
     }
@@ -619,9 +753,26 @@ int work_queue_priority_wq(FAR struct kwork_wqueue_s *wqueue)
   return tcb->sched_priority;
 }
 
+int work_queue_priority_wq(FAR struct kwork_wqueue_s *wqueue)
+{
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qpriority(wqueue);
+  work_wqueue_release(wqueue);
+  return ret;
+}
+
 int work_queue_priority(int qid)
 {
-  return work_queue_priority_wq(work_qid2wq(qid));
+  FAR struct kwork_wqueue_s *wqueue = work_qid2wq(qid);
+
+  return wqueue == NULL ? -EINVAL : work_qpriority(wqueue);
 }
 
 /****************************************************************************

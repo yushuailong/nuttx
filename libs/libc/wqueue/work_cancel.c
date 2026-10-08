@@ -169,7 +169,18 @@ int work_cancel(int qid, FAR struct work_s *work)
 int work_cancel_wq(FAR struct kwork_wqueue_s *handle,
                    FAR struct work_s *work)
 {
-  return work_qcancel((FAR struct usr_wqueue_s *)handle, false, work);
+  FAR struct usr_wqueue_s *wqueue = (FAR struct usr_wqueue_s *)handle;
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qcancel(wqueue, false, work);
+  work_wqueue_release(wqueue);
+  return ret;
 }
 #endif
 
@@ -187,7 +198,18 @@ int work_cancel_sync(int qid, FAR struct work_s *work)
 int work_cancel_sync_wq(FAR struct kwork_wqueue_s *handle,
                         FAR struct work_s *work)
 {
-  return work_qcancel((FAR struct usr_wqueue_s *)handle, true, work);
+  FAR struct usr_wqueue_s *wqueue = (FAR struct usr_wqueue_s *)handle;
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qcancel(wqueue, true, work);
+  work_wqueue_release(wqueue);
+  return ret;
 }
 #endif
 

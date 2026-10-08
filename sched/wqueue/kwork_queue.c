@@ -187,13 +187,23 @@ int work_queue_next_wq(FAR struct kwork_wqueue_s *wqueue,
                        FAR struct work_s *work, worker_t worker,
                        FAR void *arg, clock_t delay)
 {
-  return work_qqueue(wqueue, work, worker, arg, delay, true);
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qqueue(wqueue, work, worker, arg, delay, true);
+  work_wqueue_release(wqueue);
+  return ret;
 }
 
 int work_queue_next(int qid, FAR struct work_s *work, worker_t worker,
                     FAR void *arg, clock_t delay)
 {
-  return work_queue_next_wq(work_qid2wq(qid), work, worker, arg, delay);
+  return work_qqueue(work_qid2wq(qid), work, worker, arg, delay, true);
 }
 
 /****************************************************************************
@@ -230,13 +240,23 @@ int work_queue_wq(FAR struct kwork_wqueue_s *wqueue,
                   FAR struct work_s *work, worker_t worker,
                   FAR void *arg, clock_t delay)
 {
-  return work_qqueue(wqueue, work, worker, arg, delay, false);
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qqueue(wqueue, work, worker, arg, delay, false);
+  work_wqueue_release(wqueue);
+  return ret;
 }
 
 int work_queue(int qid, FAR struct work_s *work, worker_t worker,
                FAR void *arg, clock_t delay)
 {
-  return work_queue_wq(work_qid2wq(qid), work, worker, arg, delay);
+  return work_qqueue(work_qid2wq(qid), work, worker, arg, delay, false);
 }
 
 #endif /* CONFIG_SCHED_WORKQUEUE */

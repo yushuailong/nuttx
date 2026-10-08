@@ -82,6 +82,13 @@ struct kwork_wqueue_s
   bool             exit;      /* A flag to request the thread to exit */
   bool             dynamic;   /* Dynamically allocated queue */
   struct wdog_s    timer;     /* Timer to pending. */
+
+  /* Custom queue lifecycle state. */
+
+  struct list_node registry;  /* Entry in the custom queue registry */
+  sem_t            drain;     /* Wait for active API users to leave */
+  unsigned int     refs;      /* Active public API users */
+  bool             closing;   /* Queue destruction has started */
 };
 
 /* This structure defines the state of one high-priority work queue.  This
@@ -154,6 +161,17 @@ static inline_function FAR struct kwork_wqueue_s *work_qid2wq(int qid)
       return NULL;
     }
 }
+
+/****************************************************************************
+ * Name: work_wqueue_acquire/work_wqueue_release
+ *
+ * Description:
+ *   Acquire and release a lifecycle reference to a custom work queue.
+ *
+ ****************************************************************************/
+
+int work_wqueue_acquire(FAR struct kwork_wqueue_s *wqueue);
+void work_wqueue_release(FAR struct kwork_wqueue_s *wqueue);
 
 /****************************************************************************
  * Name: work_insert_pending

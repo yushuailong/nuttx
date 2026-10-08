@@ -218,8 +218,18 @@ int work_queue_wq(FAR struct kwork_wqueue_s *handle,
                   FAR struct work_s *work, worker_t worker,
                   FAR void *arg, clock_t delay)
 {
-  return work_qqueue((FAR struct usr_wqueue_s *)handle, work,
-                     worker, arg, delay, false);
+  FAR struct usr_wqueue_s *wqueue = (FAR struct usr_wqueue_s *)handle;
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qqueue(wqueue, work, worker, arg, delay, false);
+  work_wqueue_release(wqueue);
+  return ret;
 }
 #endif
 
@@ -243,8 +253,18 @@ int work_queue_next_wq(FAR struct kwork_wqueue_s *handle,
                        FAR struct work_s *work, worker_t worker,
                        FAR void *arg, clock_t delay)
 {
-  return work_qqueue((FAR struct usr_wqueue_s *)handle, work,
-                     worker, arg, delay, true);
+  FAR struct usr_wqueue_s *wqueue = (FAR struct usr_wqueue_s *)handle;
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qqueue(wqueue, work, worker, arg, delay, true);
+  work_wqueue_release(wqueue);
+  return ret;
 }
 #endif
 

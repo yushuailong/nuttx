@@ -53,6 +53,14 @@
  ****************************************************************************/
 
 /****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+static struct list_node g_usr_wqueue_registry =
+  LIST_INITIAL_VALUE(g_usr_wqueue_registry);
+static mutex_t g_usr_wqueue_registry_lock = NXMUTEX_INITIALIZER;
+
+/****************************************************************************
  * Public Data
  ****************************************************************************/
 
@@ -81,6 +89,17 @@ struct usr_wqueue_s g_usrwork =
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+static void work_registry_lock(void)
+{
+  int ret;
+
+  do
+    {
+      ret = nxmutex_lock(&g_usr_wqueue_registry_lock);
+    }
+  while (ret < 0);
+}
 
 /****************************************************************************
  * Name: work_pthread
@@ -274,6 +293,64 @@ static int work_usrtask(int argc, char *argv[])
 }
 #endif
 
+/****************************************************************************
+ * Name: work_wqueue_acquire
+ ****************************************************************************/
+
+int work_wqueue_acquire(FAR struct usr_wqueue_s *wqueue)
+{
+  FAR struct usr_wqueue_s *curr;
+  int ret = -EINVAL;
+
+  if (wqueue == NULL)
+    {
+      return -EINVAL;
+    }
+
+  work_registry_lock();
+
+  list_for_every_entry(&g_usr_wqueue_registry, curr,
+                       struct usr_wqueue_s, registry)
+    {
+      if (curr == wqueue)
+        {
+          if (curr->closing)
+            {
+              ret = -ESHUTDOWN;
+            }
+          else
+            {
+              curr->refs++;
+              ret = OK;
+            }
+
+          break;
+        }
+    }
+
+  nxmutex_unlock(&g_usr_wqueue_registry_lock);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: work_wqueue_release
+ ****************************************************************************/
+
+void work_wqueue_release(FAR struct usr_wqueue_s *wqueue)
+{
+  work_registry_lock();
+
+  DEBUGASSERT(wqueue->refs > 0);
+  wqueue->refs--;
+
+  if (wqueue->closing && wqueue->refs == 0)
+    {
+      nxsem_post(&wqueue->drain);
+    }
+
+  nxmutex_unlock(&g_usr_wqueue_registry_lock);
+}
+
 #ifndef CONFIG_DISABLE_PTHREAD
 /****************************************************************************
  * Name: work_thread_create
@@ -425,6 +502,7 @@ FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
   list_initialize(&wqueue->q);
   nxmutex_init(&wqueue->lock);
   nxsem_init(&wqueue->wake, 0, 0);
+  nxsem_init(&wqueue->drain, 0, 0);
   wqueue->worker = (FAR struct usr_worker_s *)(wqueue + 1);
   wqueue->nthreads = nthreads;
   wqueue->dynamic = true;
@@ -444,10 +522,15 @@ FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
         }
 
       nxsem_destroy(&wqueue->wake);
+      nxsem_destroy(&wqueue->drain);
       nxmutex_destroy(&wqueue->lock);
       free(wqueue);
       return NULL;
     }
+
+  work_registry_lock();
+  list_add_tail(&g_usr_wqueue_registry, &wqueue->registry);
+  nxmutex_unlock(&g_usr_wqueue_registry_lock);
 
   return (FAR struct kwork_wqueue_s *)wqueue;
 }
@@ -465,24 +548,50 @@ FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
 int work_queue_free(FAR struct kwork_wqueue_s *handle)
 {
   FAR struct usr_wqueue_s *wqueue = (FAR struct usr_wqueue_s *)handle;
+  FAR struct usr_wqueue_s *curr;
   FAR struct work_s *work;
   FAR struct work_s *next;
   pid_t self = gettid();
-  int ret;
+  unsigned int refs;
+  int ret = -EINVAL;
   int wndx;
 
-  if (wqueue == NULL || !wqueue->dynamic)
+  if (wqueue == NULL)
     {
       return -EINVAL;
+    }
+
+  /* Validate the handle and prevent new API users from entering. */
+
+  work_registry_lock();
+
+  list_for_every_entry(&g_usr_wqueue_registry, curr,
+                       struct usr_wqueue_s, registry)
+    {
+      if (curr == wqueue)
+        {
+          ret = curr->closing ? -ESHUTDOWN : OK;
+          break;
+        }
+    }
+
+  if (ret < 0)
+    {
+      nxmutex_unlock(&g_usr_wqueue_registry_lock);
+      return ret;
     }
 
   for (wndx = 0; wndx < wqueue->nthreads; wndx++)
     {
       if (self == wqueue->worker[wndx].tid)
         {
+          nxmutex_unlock(&g_usr_wqueue_registry_lock);
           return -EDEADLK;
         }
     }
+
+  wqueue->closing = true;
+  nxmutex_unlock(&g_usr_wqueue_registry_lock);
 
   do
     {
@@ -508,33 +617,67 @@ int work_queue_free(FAR struct kwork_wqueue_s *handle)
   for (wndx = 0; wndx < wqueue->nthreads; wndx++)
     {
       pthread_join(wqueue->worker[wndx].tid, NULL);
+    }
+
+  /* Keep the per-worker wait semaphores and queue storage alive until all
+   * public API calls that entered before shutdown have returned.
+   */
+
+  work_registry_lock();
+  refs = wqueue->refs;
+  nxmutex_unlock(&g_usr_wqueue_registry_lock);
+
+  if (refs > 0)
+    {
+      nxsem_wait_uninterruptible(&wqueue->drain);
+    }
+
+  work_registry_lock();
+  DEBUGASSERT(wqueue->refs == 0);
+  list_delete(&wqueue->registry);
+  nxmutex_unlock(&g_usr_wqueue_registry_lock);
+
+  for (wndx = 0; wndx < wqueue->nthreads; wndx++)
+    {
       nxsem_destroy(&wqueue->worker[wndx].wait);
     }
 
   nxsem_destroy(&wqueue->wake);
+  nxsem_destroy(&wqueue->drain);
   nxmutex_destroy(&wqueue->lock);
   free(wqueue);
   return OK;
 }
+
 #endif
 
 /****************************************************************************
  * Name: work_queue_priority_wq
  ****************************************************************************/
 
-int work_queue_priority_wq(FAR struct kwork_wqueue_s *handle)
+static int work_qpriority(FAR struct usr_wqueue_s *wqueue)
 {
-  FAR struct usr_wqueue_s *wqueue = (FAR struct usr_wqueue_s *)handle;
   struct sched_param param;
   int ret;
 
-  if (wqueue == NULL || wqueue->nthreads < 1)
-    {
-      return -EINVAL;
-    }
-
   ret = sched_getparam(wqueue->worker[0].tid, &param);
   return ret == OK ? param.sched_priority : -get_errno();
+}
+
+int work_queue_priority_wq(FAR struct kwork_wqueue_s *handle)
+{
+  FAR struct usr_wqueue_s *wqueue = (FAR struct usr_wqueue_s *)handle;
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qpriority(wqueue);
+  work_wqueue_release(wqueue);
+  return ret;
 }
 
 int work_queue_priority(int qid)
@@ -544,7 +687,7 @@ int work_queue_priority(int qid)
       return -EINVAL;
     }
 
-  return work_queue_priority_wq((FAR struct kwork_wqueue_s *)&g_usrwork);
+  return work_qpriority(&g_usrwork);
 }
 
 /****************************************************************************

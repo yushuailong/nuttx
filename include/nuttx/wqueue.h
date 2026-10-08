@@ -368,7 +368,9 @@ FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
  *   Only a custom queue returned by work_queue_create() may be destroyed;
  *   the predefined HPWORK, LPWORK, and USRWORK queues cannot be destroyed.
  *   This function must only be called from task context and must not be
- *   called by one of the queue's own worker threads.
+ *   called by one of the queue's own worker threads.  Concurrent operations
+ *   that entered before destruction started are allowed to finish before the
+ *   queue storage is released.  Later operations fail with -ESHUTDOWN.
  *
  * Input Parameters:
  *  wqueue - The work queue handle
@@ -376,8 +378,9 @@ FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
  * Returned Value:
  *   Zero on success, a negated errno value on failure.
  *
- *   -EDEADLK - Called by one of the queue's own worker threads.
- *   -EINVAL  - The handle is NULL or does not identify a custom queue.
+ *   -EDEADLK  - Called by one of the queue's own worker threads.
+ *   -EINVAL   - The handle is NULL or does not identify a custom queue.
+ *   -ESHUTDOWN - Queue destruction is already in progress.
  *
  ****************************************************************************/
 
@@ -478,8 +481,11 @@ int work_queue_next_wq(FAR struct kwork_wqueue_s *wqueue,
  *  wqueue - The work queue handle
  *
  * Returned Value:
- *   SCHED_PRIORITY_MIN ~ SCHED_PRIORITY_MAX  on success,
- *   a negated errno value on failure.
+ *   SCHED_PRIORITY_MIN ~ SCHED_PRIORITY_MAX on success, a negated errno
+ *   value on failure.
+ *
+ *   -EINVAL    - An invalid work queue was specified.
+ *   -ESHUTDOWN - The custom work queue is being destroyed.
  *
  ****************************************************************************/
 
@@ -507,7 +513,8 @@ int work_queue_priority_wq(FAR struct kwork_wqueue_s *wqueue);
  * Returned Value:
  *   Zero on success, a negated errno on failure
  *
- *   -EINVAL - An invalid work queue was specified.
+ *   -EINVAL    - An invalid work queue was specified.
+ *   -ESHUTDOWN - The custom work queue is being destroyed.
  *
  ****************************************************************************/
 
@@ -536,7 +543,8 @@ int work_cancel_wq(FAR struct kwork_wqueue_s *wqueue,
  *   caller's own worker thread.  A negated errno value is returned on any
  *   failure:
  *
- *   -EINVAL - An invalid work queue was specified.
+ *   -EINVAL    - An invalid work queue was specified.
+ *   -ESHUTDOWN - The custom work queue is being destroyed.
  *
  ****************************************************************************/
 

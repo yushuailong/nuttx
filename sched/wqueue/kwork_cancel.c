@@ -155,7 +155,17 @@ int work_cancel(int qid, FAR struct work_s *work)
 int work_cancel_wq(FAR struct kwork_wqueue_s *wqueue,
                    FAR struct work_s *work)
 {
-  return work_qcancel(wqueue, false, work);
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qcancel(wqueue, false, work);
+  work_wqueue_release(wqueue);
+  return ret;
 }
 
 /****************************************************************************
@@ -188,7 +198,17 @@ int work_cancel_sync(int qid, FAR struct work_s *work)
 int work_cancel_sync_wq(FAR struct kwork_wqueue_s *wqueue,
                         FAR struct work_s *work)
 {
-  return work_qcancel(wqueue, true, work);
+  int ret;
+
+  ret = work_wqueue_acquire(wqueue);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = work_qcancel(wqueue, true, work);
+  work_wqueue_release(wqueue);
+  return ret;
 }
 
 #endif /* CONFIG_SCHED_WORKQUEUE */
