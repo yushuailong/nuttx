@@ -555,6 +555,7 @@ int nxtask_setup_stackargs(FAR struct tcb_s *tcb,
           if (strtablen >= tcb->adj_stack_size)
             {
               ret = -ENAMETOOLONG;
+              break;
             }
           else
             {
