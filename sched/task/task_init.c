@@ -92,6 +92,7 @@ int nxtask_init(FAR struct tcb_s *tcb, const char *name, int priority,
                 FAR const posix_spawn_file_actions_t *actions)
 {
   uint8_t ttype = tcb->flags & TCB_FLAG_TTYPE_MASK;
+  bool scheduler_setup = false;
   int ret;
 
   sched_trace_begin();
@@ -186,6 +187,8 @@ int nxtask_init(FAR struct tcb_s *tcb, const char *name, int priority,
       goto errout_with_group;
     }
 
+  scheduler_setup = true;
+
   /* Initialize thread local storage */
 
   ret = tls_init_info(tcb);
@@ -209,6 +212,38 @@ int nxtask_init(FAR struct tcb_s *tcb, const char *name, int priority,
   return ret;
 
 errout_with_group:
+  if (scheduler_setup)
+    {
+      irqstate_t flags;
+
+#ifdef CONFIG_SCHED_HAVE_PARENT
+      FAR struct task_group_s *pgrp;
+
+      pgrp = this_task()->group;
+      if (pgrp != NULL)
+        {
+#ifdef CONFIG_SCHED_CHILD_STATUS
+          FAR struct child_status_s *child;
+
+          child = group_remove_child(pgrp, tcb->pid);
+          if (child != NULL)
+            {
+              group_free_child(child);
+            }
+#else
+          DEBUGASSERT(pgrp->tg_nchildren > 0);
+          pgrp->tg_nchildren--;
+#endif
+        }
+#endif
+
+      flags = enter_critical_section();
+      dq_rem((FAR dq_entry_t *)tcb, list_inactivetasks());
+      nxsched_releasepid(tcb->pid);
+      tcb->pid = 0;
+      leave_critical_section(flags);
+    }
+
   if (!stack && tcb->stack_alloc_ptr)
     {
 #ifdef CONFIG_BUILD_KERNEL
