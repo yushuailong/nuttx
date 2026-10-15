@@ -76,8 +76,14 @@
 #  define CONFIG_USBDEV_EP0_MAXSIZE 64
 #endif
 
-#ifndef CONFIG_USBDEV_SETUP_MAXDATASIZE
-#  define CONFIG_USBDEV_SETUP_MAXDATASIZE (CONFIG_USBDEV_EP0_MAXSIZE * 4)
+/* The setup data buffer must hold at least four EP0 packets.  Use the
+ * configured maximum control OUT data size only when it is larger.
+ */
+
+#if CONFIG_USBDEV_SETUP_MAXDATASIZE > (CONFIG_USBDEV_EP0_MAXSIZE * 4)
+#  define KHCI_SETUP_DATASIZE CONFIG_USBDEV_SETUP_MAXDATASIZE
+#else
+#  define KHCI_SETUP_DATASIZE (CONFIG_USBDEV_EP0_MAXSIZE * 4)
 #endif
 
 /* Extremely detailed register/BDT debug that you would normally never want
@@ -495,7 +501,7 @@ struct khci_usbdev_s
   struct wdog_s wdog;                  /* Supports the restart delay */
 
   uint8_t out0data[2][CONFIG_USBDEV_EP0_MAXSIZE];
-  uint8_t ep0data[CONFIG_USBDEV_SETUP_MAXDATASIZE];
+  uint8_t ep0data[KHCI_SETUP_DATASIZE];
   uint16_t ep0datlen;
   uint16_t ep0datreq;
 
