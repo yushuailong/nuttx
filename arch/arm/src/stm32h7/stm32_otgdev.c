@@ -596,6 +596,7 @@ static void        stm32_epout_complete(struct stm32_usbdev_s *priv,
                      struct stm32_ep_s *privep);
 static inline void stm32_ep0out_receive(struct stm32_ep_s *privep,
                                         int bcnt);
+static inline void stm32_ep0out_rearm(struct stm32_usbdev_s *priv);
 static inline void stm32_epout_receive(struct stm32_ep_s *privep,
                                        int bcnt);
 static void        stm32_epout_request(struct stm32_usbdev_s *priv,
@@ -1610,6 +1611,27 @@ static void stm32_epout_complete(struct stm32_usbdev_s *priv,
  *
  ****************************************************************************/
 
+static inline void stm32_ep0out_rearm(struct stm32_usbdev_s *priv)
+{
+  uint16_t expected = MIN(GETUINT16(priv->ctrlreq.len),
+                          CONFIG_USBDEV_SETUP_MAXDATASIZE);
+  uint16_t remaining = expected - priv->ep0datlen;
+  uint32_t regval;
+
+  if (remaining > CONFIG_USBDEV_EP0_MAXSIZE)
+    {
+      remaining = CONFIG_USBDEV_EP0_MAXSIZE;
+    }
+
+  regval = ((uint32_t)remaining << OTG_DOEPTSIZ0_XFRSIZ_SHIFT) |
+           OTG_DOEPTSIZ0_PKTCNT;
+  stm32_putreg(regval, STM32_OTG_DOEPTSIZ(0));
+
+  regval = stm32_getreg(STM32_OTG_DOEPCTL(0));
+  regval |= OTG_DOEPCTL0_CNAK | OTG_DOEPCTL0_EPENA;
+  stm32_putreg(regval, STM32_OTG_DOEPCTL(0));
+}
+
 static inline void stm32_ep0out_receive(struct stm32_ep_s *privep,
                                         int bcnt)
 {
@@ -1629,22 +1651,30 @@ static inline void stm32_ep0out_receive(struct stm32_ep_s *privep,
 
   if (priv->ep0state == EP0STATE_SETUP_OUT)
     {
-      /* Read the data into our special buffer for SETUP data */
+      uint16_t expected = MIN(GETUINT16(priv->ctrlreq.len),
+                              CONFIG_USBDEV_SETUP_MAXDATASIZE);
+      uint16_t available = CONFIG_USBDEV_SETUP_MAXDATASIZE -
+                           priv->ep0datlen;
+      int readlen = MIN(available, bcnt);
 
-      int readlen = MIN(CONFIG_USBDEV_SETUP_MAXDATASIZE, bcnt);
-      stm32_rxfifo_read(privep, priv->ep0data, readlen);
+      /* Append this packet to the setup data buffer. */
 
-      /* Do we have to discard any excess bytes? */
+      stm32_rxfifo_read(privep, priv->ep0data + priv->ep0datlen,
+                        readlen);
+      stm32_rxfifo_discard(privep, bcnt - readlen);
+      priv->ep0datlen += readlen;
 
-      stm32_rxfifo_discard(privep,  bcnt - readlen);
+      /* Process the request only after receiving its complete data stage.
+       * A short packet also terminates the transfer.
+       */
 
-      /* Now we can process the setup command */
-
-      privep->active  = false;
-      priv->ep0state  = EP0STATE_SETUP_READY;
-      priv->ep0datlen = readlen;
-
-      stm32_ep0out_setup(priv);
+      if (priv->ep0datlen >= expected ||
+          bcnt < CONFIG_USBDEV_EP0_MAXSIZE)
+        {
+          privep->active = false;
+          priv->ep0state = EP0STATE_SETUP_READY;
+          stm32_ep0out_setup(priv);
+        }
     }
   else
     {
@@ -2706,6 +2736,14 @@ static inline void stm32_epout(struct stm32_usbdev_s *priv, uint8_t epno)
               priv->ep0state = EP0STATE_IDLE;
             }
         }
+      else if (priv->ep0state == EP0STATE_SETUP_OUT)
+        {
+          /* EP0 accepts one data packet per programmed transfer.  Rearm it
+           * until the complete setup OUT data stage is buffered.
+           */
+
+          stm32_ep0out_rearm(priv);
+        }
     }
 
   /* For other endpoints, the only possibility is that we are continuing
@@ -3362,11 +3400,7 @@ static inline void stm32_rxinterrupt(struct stm32_usbdev_s *priv)
 
               if (priv->ep0state == EP0STATE_SETUP_OUT)
                 {
-                  /* Clear NAKSTS so that we can receive the data */
-
-                  regval  = stm32_getreg(STM32_OTG_DOEPCTL(0));
-                  regval |= OTG_DOEPCTL0_CNAK;
-                  stm32_putreg(regval, STM32_OTG_DOEPCTL(0));
+                  stm32_ep0out_rearm(priv);
                 }
             }
             break;
@@ -3407,6 +3441,7 @@ static inline void stm32_rxinterrupt(struct stm32_usbdev_s *priv)
               datlen = GETUINT16(priv->ctrlreq.len);
               if (USB_REQ_ISOUT(priv->ctrlreq.type) && datlen > 0)
                 {
+                  priv->ep0datlen = 0;
                   priv->ep0state = EP0STATE_SETUP_OUT;
                 }
               else
