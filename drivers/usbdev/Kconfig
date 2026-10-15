@@ -37,6 +37,16 @@ config USBDEV_EPBUFFER_ALIGNMENT
 	---help---
 		The aligned bytes of usbdev ep req buffer
 
+config USBDEV_SETUP_MAXDATASIZE
+	int "Maximum control OUT request data size"
+	default 64
+	range 64 65535
+	---help---
+		Maximum number of bytes that the device controller buffers for the
+		data stage of a host-to-device control request.  Controllers that
+		support multi-packet EP0 OUT transfers use this value for their setup
+		data buffer.  The default supports one full-speed EP0 packet.
+
 choice
 	prompt "Select USB device powered"
 	default USBDEV_SELFPOWERED

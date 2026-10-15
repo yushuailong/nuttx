@@ -89,8 +89,14 @@
 #  define CONFIG_USBDEV_EP0_MAXSIZE 64
 #endif
 
-#ifndef CONFIG_USBDEV_SETUP_MAXDATASIZE
-#  define CONFIG_USBDEV_SETUP_MAXDATASIZE (CONFIG_USBDEV_EP0_MAXSIZE * 4)
+/* The setup data buffer must hold at least four EP0 packets.  Use the
+ * configured maximum control OUT data size only when it is larger.
+ */
+
+#if CONFIG_USBDEV_SETUP_MAXDATASIZE > (CONFIG_USBDEV_EP0_MAXSIZE * 4)
+#  define CXD56_SETUP_DATASIZE CONFIG_USBDEV_SETUP_MAXDATASIZE
+#else
+#  define CXD56_SETUP_DATASIZE (CONFIG_USBDEV_EP0_MAXSIZE * 4)
 #endif
 
 #define CONFIG_DEFAULT_PHY_CFG0 \
@@ -366,7 +372,7 @@ struct cxd56_usbdev_s
 
   struct usb_ctrlreq_s ctrl; /* Last EP0 request */
 
-  uint8_t ep0data[CONFIG_USBDEV_SETUP_MAXDATASIZE];
+  uint8_t ep0data[CXD56_SETUP_DATASIZE];
   uint16_t ep0datlen;
   uint16_t ep0reqlen;
 
