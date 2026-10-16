@@ -2058,8 +2058,8 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
             {
             case USB_REQ_GETSTATUS:
               {
-                /* type:  device-to-host; recipient = device, interface,
-                 *        endpoint
+              /* type:  device-to-host; recipient = device, interface,
+               *        endpoint
                  * value: 0
                  * index: zero interface endpoint
                  * len:   2; data = status
@@ -2170,8 +2170,8 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
 
             case USB_REQ_CLEARFEATURE:
               {
-                /* type:  host-to-device; recipient = device, interface or
-                 *        endpoint
+              /* type:  host-to-device; recipient = device, interface or
+               *        endpoint
                  * value: feature selector
                  * index: zero interface endpoint;
                  * len:   zero, data = none
@@ -2216,9 +2216,9 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
                       }
                     else
                       {
-                        /* Let the class implementation handle all other
-                         * device features
-                         */
+                      /* Let the class implementation handle all other
+                       * device features
+                       */
 
                         khci_dispatchrequest(priv);
                         dispatched = true;
@@ -2246,9 +2246,9 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
                   }
                 else
                   {
-                    /* Let the class implementation handle all other
-                     * recipients.
-                     */
+                  /* Let the class implementation handle all other
+                   * recipients.
+                   */
 
                     khci_dispatchrequest(priv);
                     dispatched = true;
@@ -2258,8 +2258,8 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
 
             case USB_REQ_SETFEATURE:
               {
-                /* type:  host-to-device; recipient = device, interface,
-                 *        endpoint
+              /* type:  host-to-device; recipient = device, interface,
+               *        endpoint
                  * value: feature selector
                  * index: zero interface endpoint;
                  * len:   0; data = none
@@ -2310,9 +2310,9 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
                       }
                     else
                       {
-                        /* Let the class implementation handle all other
-                         * device features
-                         */
+                      /* Let the class implementation handle all other
+                       * device features
+                       */
 
                         khci_dispatchrequest(priv);
                         dispatched = true;
@@ -2341,9 +2341,9 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
                   }
                 else
                   {
-                    /* The class driver handles all recipients except
-                     * recipient=endpoint
-                     */
+                  /* The class driver handles all recipients except
+                   * recipient=endpoint
+                   */
 
                     khci_dispatchrequest(priv);
                     dispatched = true;
@@ -2353,8 +2353,8 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
 
             case USB_REQ_SETADDRESS:
               {
-                /* type:  host-to-device; recipient = device
-                 * value: device address
+              /* type:  host-to-device; recipient = device
+               * value: device address
                  * index: 0
                  * len:   0; data = none
                  */
@@ -2370,8 +2370,8 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
                   }
                 else
                   {
-                    /* Note that setting of the device address will be
-                     * deferred. A zero-length packet will be sent and the
+                  /* Note that setting of the device address will be
+                   * deferred. A zero-length packet will be sent and the
                      * device address will be set when the zerolength packet
                      * transfer completes.
                      */
@@ -2401,8 +2401,8 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
                 if ((priv->ctrl.type & USB_REQ_RECIPIENT_MASK) ==
                     USB_REQ_RECIPIENT_DEVICE)
                   {
-                    /* The request seems valid...
-                     * let the class implementation handle it
+                  /* The request seems valid...
+                   * let the class implementation handle it
                      */
 
                     khci_dispatchrequest(priv);
@@ -2430,8 +2430,8 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
                     USB_REQ_RECIPIENT_DEVICE && value.w == 0 &&
                     index.w == 0 && len.w == 1)
                   {
-                    /* The request seems valid... let the class
-                     * implementation handle it
+                  /* The request seems valid... let the class
+                   * implementation handle it
                      */
 
                     khci_dispatchrequest(priv);
@@ -2458,8 +2458,8 @@ static void khci_ep0setup(struct khci_usbdev_s *priv)
                 if ((priv->ctrl.type & USB_REQ_RECIPIENT_MASK) ==
                     USB_REQ_RECIPIENT_DEVICE && index.w == 0 && len.w == 0)
                   {
-                     /* The request seems valid. Let the class implementation
-                      * handle it
+                  /* The request seems valid. Let the class implementation
+                   * handle it
                       */
 
                      khci_dispatchrequest(priv);
