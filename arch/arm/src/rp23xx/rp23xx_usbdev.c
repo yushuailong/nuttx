@@ -1252,11 +1252,11 @@ static void rp23xx_ep0setup(struct rp23xx_usbdev_s *priv)
             break;
 
           case USB_REQ_SYNCHFRAME:
-              /* type:  device-to-host; recipient = endpoint
-               * value: 0
-               * index: endpoint;
-               * len:   2; data = frame number
-               */
+            /* type:  device-to-host; recipient = endpoint
+             * value: 0
+             * index: endpoint;
+             * len:   2; data = frame number
+             */
 
             {
               usbtrace(TRACE_INTDECODE(RP23XX_TRACEINTID_SYNCHFRAME), 0);
@@ -1505,7 +1505,8 @@ static int rp23xx_usbinterrupt(int irq, void *context, void *arg)
   if (stat & RP23XX_USBCTRL_REGS_INTR_BUFF_STATUS)
     {
       while (rp23xx_usbintr_buffstat(priv))
-        ;
+        {
+        }
     }
 
   if (stat & RP23XX_USBCTRL_REGS_INTR_SETUP_REQ)

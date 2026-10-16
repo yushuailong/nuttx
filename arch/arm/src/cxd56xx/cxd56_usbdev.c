@@ -1219,6 +1219,7 @@ static inline void cxd56_ep0setup(struct cxd56_usbdev_s *priv)
   while (!cxd56_rqempty(ep0))
     {
       int16_t result = OK;
+
       if (privreq->req.xfrd != privreq->req.len)
         {
           result = -EPROTO;
@@ -1525,277 +1526,277 @@ static int cxd56_epinterrupt(int irq, void *context)
   int n;
 
   eps = getreg32(CXD56_USB_DEV_EP_INTR);
-    {
-      for (n = 0; n < CXD56_NENDPOINTS; n++)
-        {
-          /* Determine IN endpoint interrupts */
+  {
+    for (n = 0; n < CXD56_NENDPOINTS; n++)
+      {
+        /* Determine IN endpoint interrupts */
 
-          privep = &priv->eplist[n];
+        privep = &priv->eplist[n];
 
-          if (eps & (1 << n))
-            {
-              stat = getreg32(CXD56_USB_IN_EP_STATUS(n));
+        if (eps & (1 << n))
+          {
+            stat = getreg32(CXD56_USB_IN_EP_STATUS(n));
 
-              if (stat & USB_INT_RCS)
-                {
-                  /* Handle Clear_Feature */
+            if (stat & USB_INT_RCS)
+              {
+                /* Handle Clear_Feature */
 
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_CLEARFEATURE),
-                                           n);
-                  ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(n));
-                  putreg32(ctrl | USB_F, CXD56_USB_IN_EP_CONTROL(n));
-                  putreg32(ctrl | USB_CNAK, CXD56_USB_IN_EP_CONTROL(n));
-                  ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(n));
-                  putreg32(USB_INT_RCS, CXD56_USB_IN_EP_STATUS(n));
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_CLEARFEATURE),
+                                         n);
+                ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(n));
+                putreg32(ctrl | USB_F, CXD56_USB_IN_EP_CONTROL(n));
+                putreg32(ctrl | USB_CNAK, CXD56_USB_IN_EP_CONTROL(n));
+                ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(n));
+                putreg32(USB_INT_RCS, CXD56_USB_IN_EP_STATUS(n));
 
-                  privep->stalled = 0;
-                  privep->halted = 0;
-                }
+                privep->stalled = 0;
+                privep->halted = 0;
+              }
 
-              if (stat & USB_INT_RSS)
-                {
-                  /* Handle Set_Feature */
+            if (stat & USB_INT_RSS)
+              {
+                /* Handle Set_Feature */
 
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_SETFEATURE), n);
-                  putreg32(USB_INT_RSS, CXD56_USB_IN_EP_STATUS(n));
-                  privep->halted = 1;
-                }
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_SETFEATURE), n);
+                putreg32(USB_INT_RSS, CXD56_USB_IN_EP_STATUS(n));
+                privep->halted = 1;
+              }
 
-              if (stat & USB_INT_TXEMPTY)
-                {
-                  /* Transmit FIFO Empty detected */
+            if (stat & USB_INT_TXEMPTY)
+              {
+                /* Transmit FIFO Empty detected */
 
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_TXEMPTY), n);
-                  putreg32(USB_INT_TXEMPTY, CXD56_USB_IN_EP_STATUS(n));
-                }
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_TXEMPTY), n);
+                putreg32(USB_INT_TXEMPTY, CXD56_USB_IN_EP_STATUS(n));
+              }
 
-              if (stat & USB_INT_TDC)
-                {
-                  /* DMA Transmit complete for TxFIFO */
+            if (stat & USB_INT_TDC)
+              {
+                /* DMA Transmit complete for TxFIFO */
 
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_TDC), n);
-                  putreg32(USB_INT_TDC, CXD56_USB_IN_EP_STATUS(n));
-                }
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_TDC), n);
+                putreg32(USB_INT_TDC, CXD56_USB_IN_EP_STATUS(n));
+              }
 
-              if (stat & USB_INT_XFERDONE)
-                {
-                  /* Transfer Done/Transmit FIFO Empty */
+            if (stat & USB_INT_XFERDONE)
+              {
+                /* Transfer Done/Transmit FIFO Empty */
 
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_XFERDONE), n);
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_XFERDONE), n);
 
-                  /* Set NAK during processing IN request completion */
+                /* Set NAK during processing IN request completion */
 
-                  ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(n));
-                  putreg32(ctrl | USB_SNAK, CXD56_USB_IN_EP_CONTROL(n));
+                ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(n));
+                putreg32(ctrl | USB_SNAK, CXD56_USB_IN_EP_CONTROL(n));
 
-                  putreg32(USB_INT_XFERDONE, CXD56_USB_IN_EP_STATUS(n));
+                putreg32(USB_INT_XFERDONE, CXD56_USB_IN_EP_STATUS(n));
 
-                  cxd56_txdmacomplete(privep);
+                cxd56_txdmacomplete(privep);
 
-                  /* Clear NAK to raise IN interrupt for send next IN
-                   * packets.
-                   */
+                /* Clear NAK to raise IN interrupt for send next IN
+                 * packets.
+                 */
 
-                  putreg32(ctrl | USB_CNAK, CXD56_USB_IN_EP_CONTROL(n));
-                }
+                putreg32(ctrl | USB_CNAK, CXD56_USB_IN_EP_CONTROL(n));
+              }
 
-              if (stat & USB_INT_IN)
-                {
-                  /* Reply NAK for IN token when TxFIFO empty */
+            if (stat & USB_INT_IN)
+              {
+                /* Reply NAK for IN token when TxFIFO empty */
 
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_IN), n);
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_IN), n);
 
-                  ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(n));
-                  putreg32(ctrl | USB_SNAK, CXD56_USB_IN_EP_CONTROL(n));
+                ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(n));
+                putreg32(ctrl | USB_SNAK, CXD56_USB_IN_EP_CONTROL(n));
 
-                  /* If IN request is ready, then send it. */
+                /* If IN request is ready, then send it. */
 
-                  if (!cxd56_rqempty(privep))
-                    {
-                      cxd56_wrrequest(privep);
-                    }
-                  else
-                    {
-                      privep->txwait = 1;
-                    }
+                if (!cxd56_rqempty(privep))
+                  {
+                    cxd56_wrrequest(privep);
+                  }
+                else
+                  {
+                    privep->txwait = 1;
+                  }
 
-                  putreg32(USB_INT_IN, CXD56_USB_IN_EP_STATUS(n));
-                }
+                putreg32(USB_INT_IN, CXD56_USB_IN_EP_STATUS(n));
+              }
 
-              if (stat & USB_INT_HE)
-                {
-                  /* Detect AHB Bus error */
+            if (stat & USB_INT_HE)
+              {
+                /* Detect AHB Bus error */
 
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_TXDMAERROR), n);
-                  putreg32(USB_INT_HE, CXD56_USB_IN_EP_STATUS(n));
-                }
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_TXDMAERROR), n);
+                putreg32(USB_INT_HE, CXD56_USB_IN_EP_STATUS(n));
+              }
 
-              if (stat & USB_INT_BNA)
-                {
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_TXBNA), n);
-                  putreg32(USB_INT_BNA, CXD56_USB_IN_EP_STATUS(n));
-                }
+            if (stat & USB_INT_BNA)
+              {
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_TXBNA), n);
+                putreg32(USB_INT_BNA, CXD56_USB_IN_EP_STATUS(n));
+              }
 
-              putreg32(1 << n, CXD56_USB_DEV_EP_INTR);
-            }
+            putreg32(1 << n, CXD56_USB_DEV_EP_INTR);
+          }
 
-          /* Determine OUT endpoint interrupts */
+        /* Determine OUT endpoint interrupts */
 
-          if (eps & (1 << (n + 16)))
-            {
-              stat = getreg32(CXD56_USB_OUT_EP_STATUS(n));
+        if (eps & (1 << (n + 16)))
+          {
+            stat = getreg32(CXD56_USB_OUT_EP_STATUS(n));
 
-              if (USB_INT_OUT(stat) == USB_INT_OUT_SETUP)
-                {
-                  putreg32(USB_INT_OUT_SETUP, CXD56_USB_OUT_EP_STATUS(n));
-                  if (n == 0)
-                    {
-                      usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_OUTSETUP),
-                                               0);
+            if (USB_INT_OUT(stat) == USB_INT_OUT_SETUP)
+              {
+                putreg32(USB_INT_OUT_SETUP, CXD56_USB_OUT_EP_STATUS(n));
+                if (n == 0)
+                  {
+                    usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_OUTSETUP),
+                                             0);
 
-                      ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(0));
-                      putreg32(ctrl | USB_SNAK, CXD56_USB_OUT_EP_CONTROL(0));
+                    ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(0));
+                    putreg32(ctrl | USB_SNAK, CXD56_USB_OUT_EP_CONTROL(0));
 
-                      cxd56_ep0setup(priv);
+                    cxd56_ep0setup(priv);
 
-                      putreg32(ctrl | USB_CNAK | USB_RRDY,
-                               CXD56_USB_OUT_EP_CONTROL(0));
+                    putreg32(ctrl | USB_CNAK | USB_RRDY,
+                             CXD56_USB_OUT_EP_CONTROL(0));
 
-                      ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(0));
-                      putreg32(ctrl | USB_CNAK, CXD56_USB_IN_EP_CONTROL(0));
-                    }
-                }
+                    ctrl = getreg32(CXD56_USB_IN_EP_CONTROL(0));
+                    putreg32(ctrl | USB_CNAK, CXD56_USB_IN_EP_CONTROL(0));
+                  }
+              }
 
-              if (USB_INT_OUT(stat) == USB_INT_OUT_DATA)
-                {
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_OUTDATA), n);
-                  putreg32(USB_INT_OUT_DATA, CXD56_USB_OUT_EP_STATUS(n));
-                  if (n == 0)
-                    {
-                      len = g_ep0out.status & DESC_SIZE_MASK;
+            if (USB_INT_OUT(stat) == USB_INT_OUT_DATA)
+              {
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_OUTDATA), n);
+                putreg32(USB_INT_OUT_DATA, CXD56_USB_OUT_EP_STATUS(n));
+                if (n == 0)
+                  {
+                    len = g_ep0out.status & DESC_SIZE_MASK;
 
-                      /* Reset DMA descriptor for next packet */
+                    /* Reset DMA descriptor for next packet */
 
-                      g_ep0out.status = privep->ep.maxpacket | DESC_LAST;
+                    g_ep0out.status = privep->ep.maxpacket | DESC_LAST;
 
-                      if (0 < len)
-                        {
-                          ASSERT(priv->ep0datlen + len <=
-                                 sizeof(priv->ep0data));
+                    if (0 < len)
+                      {
+                        ASSERT(priv->ep0datlen + len <=
+                               sizeof(priv->ep0data));
 
-                          memcpy(priv->ep0data + priv->ep0datlen,
-                                 (const void *)g_ep0out.buf,
-                                 len);
+                        memcpy(priv->ep0data + priv->ep0datlen,
+                               (const void *)g_ep0out.buf,
+                               len);
 
-                          priv->ep0datlen += len;
-                        }
+                        priv->ep0datlen += len;
+                      }
 
-                      /* Dispatch to cxd56_ep0setup if received all OUT
-                       * data.
-                       */
+                    /* Dispatch to cxd56_ep0setup if received all OUT
+                     * data.
+                     */
 
-                      if (priv->ep0datlen == priv->ep0reqlen)
-                        {
-                          if (((priv->ctrl.type & USB_REQ_TYPE_MASK) !=
-                               USB_REQ_TYPE_STANDARD) &&
-                              USB_REQ_ISOUT(priv->ctrl.type))
-                            {
-                              /* Ready to receive the next setup packet */
+                    if (priv->ep0datlen == priv->ep0reqlen)
+                      {
+                        if (((priv->ctrl.type & USB_REQ_TYPE_MASK) !=
+                             USB_REQ_TYPE_STANDARD) &&
+                            USB_REQ_ISOUT(priv->ctrl.type))
+                          {
+                            /* Ready to receive the next setup packet */
 
-                              ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(0));
-                              putreg32(ctrl | USB_SNAK | USB_RRDY,
-                                       CXD56_USB_OUT_EP_CONTROL(0));
+                            ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(0));
+                            putreg32(ctrl | USB_SNAK | USB_RRDY,
+                                     CXD56_USB_OUT_EP_CONTROL(0));
 
-                              cxd56_ep0setup(priv);
-                              priv->ep0datlen = 0;
-                            }
-                        }
-                      else
-                        {
-                          /* Ready to receive the next OUT packet */
+                            cxd56_ep0setup(priv);
+                            priv->ep0datlen = 0;
+                          }
+                      }
+                    else
+                      {
+                        /* Ready to receive the next OUT packet */
 
-                          ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(0));
-                          putreg32(ctrl | USB_CNAK | USB_RRDY,
-                                   CXD56_USB_OUT_EP_CONTROL(0));
-                        }
-                    }
-                  else
-                    {
-                      cxd56_rxdmacomplete(privep);
-                    }
-                }
+                        ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(0));
+                        putreg32(ctrl | USB_CNAK | USB_RRDY,
+                                 CXD56_USB_OUT_EP_CONTROL(0));
+                      }
+                  }
+                else
+                  {
+                    cxd56_rxdmacomplete(privep);
+                  }
+              }
 
-              if (stat & USB_INT_CDC_CLEAR)
-                {
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_CDCCLEAR), n);
-                  putreg32(USB_INT_CDC_CLEAR, CXD56_USB_OUT_EP_STATUS(n));
-                }
+            if (stat & USB_INT_CDC_CLEAR)
+              {
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_CDCCLEAR), n);
+                putreg32(USB_INT_CDC_CLEAR, CXD56_USB_OUT_EP_STATUS(n));
+              }
 
-              if (stat & USB_INT_RSS)
-                {
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_SETFEATURE), n);
-                  ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(0));
-                  putreg32(USB_INT_RSS, CXD56_USB_OUT_EP_STATUS(n));
-                  privep->halted = 1;
-                }
+            if (stat & USB_INT_RSS)
+              {
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_SETFEATURE), n);
+                ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(0));
+                putreg32(USB_INT_RSS, CXD56_USB_OUT_EP_STATUS(n));
+                privep->halted = 1;
+              }
 
-              if (stat & USB_INT_RCS)
-                {
-                  uint32_t status;
+            if (stat & USB_INT_RCS)
+              {
+                uint32_t status;
 
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_CLEARFEATURE),
-                                           n);
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_CLEARFEATURE),
+                                         n);
 
-                  ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(n));
+                ctrl = getreg32(CXD56_USB_OUT_EP_CONTROL(n));
 
-                  /* Make sure that want the DMA transfer stopped. */
+                /* Make sure that want the DMA transfer stopped. */
 
-                  /* The S bit needs to be clear by hand */
+                /* The S bit needs to be clear by hand */
 
-                  ctrl &= ~USB_STALL;
+                ctrl &= ~USB_STALL;
 
-                  putreg32(ctrl | USB_CLOSEDESC,
-                           CXD56_USB_OUT_EP_CONTROL(n));
-                  do
-                    {
-                      status = getreg32(CXD56_USB_OUT_EP_STATUS(n));
-                    }
-                  while (!(status & USB_INT_CDC_CLEAR));
-                  putreg32(USB_INT_CDC_CLEAR, CXD56_USB_OUT_EP_STATUS(n));
+                putreg32(ctrl | USB_CLOSEDESC,
+                         CXD56_USB_OUT_EP_CONTROL(n));
+                do
+                  {
+                    status = getreg32(CXD56_USB_OUT_EP_STATUS(n));
+                  }
+                while (!(status & USB_INT_CDC_CLEAR));
+                putreg32(USB_INT_CDC_CLEAR, CXD56_USB_OUT_EP_STATUS(n));
 
-                  if (!(stat & USB_INT_MRXFIFOEMPTY))
-                    {
-                      /* Flush Receive FIFO and clear NAK to finish status
-                       * stage.
-                       */
+                if (!(stat & USB_INT_MRXFIFOEMPTY))
+                  {
+                    /* Flush Receive FIFO and clear NAK to finish status
+                     * stage.
+                     */
 
-                      putreg32(ctrl | USB_MRXFLUSH,
-                               CXD56_USB_OUT_EP_CONTROL(n));
-                    }
+                    putreg32(ctrl | USB_MRXFLUSH,
+                             CXD56_USB_OUT_EP_CONTROL(n));
+                  }
 
-                  putreg32(ctrl | USB_CNAK, CXD56_USB_OUT_EP_CONTROL(n));
-                  putreg32(USB_INT_RCS, CXD56_USB_OUT_EP_STATUS(n));
-                  privep->stalled = 0;
-                  privep->halted = 0;
-                }
+                putreg32(ctrl | USB_CNAK, CXD56_USB_OUT_EP_CONTROL(n));
+                putreg32(USB_INT_RCS, CXD56_USB_OUT_EP_STATUS(n));
+                privep->stalled = 0;
+                privep->halted = 0;
+              }
 
-              if (stat & USB_INT_HE)
-                {
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_RXDMAERROR), n);
-                  putreg32(USB_INT_HE, CXD56_USB_OUT_EP_STATUS(n));
-                }
+            if (stat & USB_INT_HE)
+              {
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_RXDMAERROR), n);
+                putreg32(USB_INT_HE, CXD56_USB_OUT_EP_STATUS(n));
+              }
 
-              if (stat & USB_INT_BNA)
-                {
-                  usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_RXBNA), n);
-                  cxd56_rdrequest(privep);
-                  putreg32(USB_INT_BNA, CXD56_USB_OUT_EP_STATUS(n));
-                }
+            if (stat & USB_INT_BNA)
+              {
+                usbtrace(TRACE_INTDECODE(CXD56_TRACEINTID_RXBNA), n);
+                cxd56_rdrequest(privep);
+                putreg32(USB_INT_BNA, CXD56_USB_OUT_EP_STATUS(n));
+              }
 
-              putreg32(1 << (n + 16), CXD56_USB_DEV_EP_INTR);
-            }
-        }
-    }
+            putreg32(1 << (n + 16), CXD56_USB_DEV_EP_INTR);
+          }
+      }
+  }
 
   return OK;
 }
@@ -3370,6 +3371,7 @@ static void cxd56_notify_signal(uint16_t state, uint16_t power)
   if (priv->signo > 0)
     {
       union sigval value;
+
       value.sival_int = state << 16 | power;
       nxsig_queue(priv->pid, priv->signo, value);
     }
