@@ -1490,6 +1490,7 @@ static void stm32_rxfifo_read(struct stm32_ep_s *privep,
 {
   uint32_t regaddr;
   int i;
+  int j;
 
   /* Get the address of the RxFIFO.  Note:  there is only one RxFIFO so
    * we might as well use the address associated with EP0.
@@ -1497,8 +1498,8 @@ static void stm32_rxfifo_read(struct stm32_ep_s *privep,
 
   regaddr = STM32_OTG_DFIFO_DEP(EP0);
 
-  /* Read 32-bits and write 4 x 8-bits at time
-   * (to avoid unaligned accesses)
+  /* Read 32 bits at a time, but copy only the requested bytes.  Byte
+   * accesses also avoid unaligned writes to the destination buffer.
    */
 
   for (i = 0; i < len; i += 4)
@@ -1513,12 +1514,10 @@ static void stm32_rxfifo_read(struct stm32_ep_s *privep,
 
       data.w = stm32_getreg(regaddr);
 
-      /* Write 4 x 8-bits of EP0 packet data */
-
-      *dest++ = data.b[0];
-      *dest++ = data.b[1];
-      *dest++ = data.b[2];
-      *dest++ = data.b[3];
+      for (j = 0; j < MIN(4, len - i); j++)
+        {
+          *dest++ = data.b[j];
+        }
     }
 }
 
@@ -1605,12 +1604,10 @@ static void stm32_epout_complete(struct stm32_usbdev_s *priv,
 }
 
 /****************************************************************************
- * Name: stm32_ep0out_receive
+ * Name: stm32_ep0out_rearm
  *
  * Description:
- *   This function is called from the RXFLVL interrupt handler when new
- *   incoming data is available in the endpoint's RxFIFO.  This function
- *   will simply copy the incoming data into pending request's data buffer.
+ *   Enable reception of the next packet of a control OUT data stage.
  *
  ****************************************************************************/
 
@@ -1634,6 +1631,16 @@ static inline void stm32_ep0out_rearm(struct stm32_usbdev_s *priv)
   regval |= OTG_DOEPCTL0_CNAK | OTG_DOEPCTL0_EPENA;
   stm32_putreg(regval, STM32_OTG_DOEPCTL(0));
 }
+
+/****************************************************************************
+ * Name: stm32_ep0out_receive
+ *
+ * Description:
+ *   Append control OUT data from the RxFIFO and dispatch the request when
+ *   the data stage is complete, including termination by a zero-length
+ *   packet.
+ *
+ ****************************************************************************/
 
 static inline void stm32_ep0out_receive(struct stm32_ep_s *privep,
                                         int bcnt)
@@ -1664,7 +1671,12 @@ static inline void stm32_ep0out_receive(struct stm32_ep_s *privep,
 
       stm32_rxfifo_read(privep, priv->ep0data + priv->ep0datlen,
                         readlen);
-      stm32_rxfifo_discard(privep, bcnt - readlen);
+
+      /* The FIFO read consumes a whole word even when only part of that
+       * word fits in the buffer.  Do not discard those bytes twice.
+       */
+
+      stm32_rxfifo_discard(privep, bcnt - roundup(readlen, 4));
       priv->ep0datlen += readlen;
 
       /* Process the request only after receiving its complete data stage.
@@ -1768,10 +1780,11 @@ static inline void stm32_epout_receive(struct stm32_ep_s *privep,
   stm32_rxfifo_read(privep, dest, readlen);
 
   /* If there were more bytes in the RxFIFO than could be held in the read
-   * request, then we will have to discard those.
+   * request, then we will have to discard those.  Account for the entire
+   * last word already consumed by the FIFO read.
    */
 
-  stm32_rxfifo_discard(privep, bcnt - readlen);
+  stm32_rxfifo_discard(privep, bcnt - roundup(readlen, 4));
 
   /* Update the number of bytes transferred */
 
@@ -3367,6 +3380,15 @@ static inline void stm32_rxinterrupt(struct stm32_usbdev_s *priv)
               if (bcnt > 0)
                 {
                   stm32_epout_receive(privep, bcnt);
+                }
+              else if (epphy == EP0 &&
+                       priv->ep0state == EP0STATE_SETUP_OUT)
+                {
+                  /* A zero-length packet terminates the control OUT data
+                   * stage just like any other short packet.
+                   */
+
+                  stm32_ep0out_receive(privep, 0);
                 }
             }
             break;

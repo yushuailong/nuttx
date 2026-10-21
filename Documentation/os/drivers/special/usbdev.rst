@@ -48,3 +48,23 @@ USB Device-Side Drivers
       USB class driver to the USB device controller driver,
       completing the initialization.
 
+Control OUT Data Buffering
+==========================
+
+``CONFIG_USBDEV_SETUP_MAXDATASIZE`` configures the buffer used by supporting
+device controllers for the data stage of host-to-device control requests.
+The default is 64 bytes.  Some controllers retain a larger minimum buffer
+to preserve their existing behavior.
+
+The STM32H7 OTG device driver assembles multiple EP0 OUT packets before
+dispatching a control request to the class driver.  Set this option to at
+least the largest control OUT payload expected by the class driver; for
+example, use 2048 for a class driver accepting 2048-byte control writes.
+The buffer size need not be a multiple of four or of the EP0 packet size.
+A short packet, including a zero-length packet, ends the data stage early.
+The class driver must check the received length against its protocol.
+
+Increasing this option allocates more RAM in the controller driver.  It
+does not change the EP0 maximum packet size or add multi-packet support to
+controllers that do not implement it.
+
