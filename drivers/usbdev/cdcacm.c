@@ -339,6 +339,15 @@ static bool cdcuart_txready(FAR struct uart_dev_s *dev)
 {
   FAR struct cdcacm_dev_s *priv = dev->priv;
 
+  /* The serial upper half may poll with interrupts disabled. */
+
+  if (sq_empty(&priv->txfree))
+    {
+      priv->ispolling = true;
+      EP_POLL(priv->epbulkin);
+      priv->ispolling = false;
+    }
+
   return !sq_empty(&priv->txfree);
 }
 
@@ -3212,7 +3221,7 @@ ssize_t cdcacm_write(FAR const char *buffer, size_t buflen)
        * completion or poll the controller recursively when TX is full.
        */
 
-      if (!cdcuart_txready(&priv->serdev))
+      if (priv->ispolling || sq_empty(&priv->txfree))
         {
           return len > 0 ? (ssize_t)len : -EAGAIN;
         }
