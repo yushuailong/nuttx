@@ -2096,19 +2096,21 @@ static int qspi_command(struct qspi_dev_s *dev,
       else
         {
           uint32_t regval;
-          uint32_t addrval;
 
-          addrval = qspi_getreg(priv, STM32_QUADSPI_AR_OFFSET);
-
-          /* Set up the Communications Configuration Register as per command
-           * info
+          /* Load the new address before switching to indirect read mode.
+           * Changing CCR in read mode can start a transfer using the old AR.
            */
 
-          qspi_ccrconfig(priv, &xctn, CCR_FMODE_INDRD);
+          qspi_ccrconfig(priv, &xctn, CCR_FMODE_INDWR);
+          regval  = qspi_getreg(priv, STM32_QUADSPI_CCR_OFFSET);
+          regval &= ~QSPI_CCR_FMODE_MASK;
+          regval |= QSPI_CCR_FMODE(CCR_FMODE_INDRD);
+          qspi_putreg(priv, regval, STM32_QUADSPI_CCR_OFFSET);
 
-          /* Start the transfer by re-writing the address in AR register */
-
-          qspi_putreg(priv, addrval, STM32_QUADSPI_AR_OFFSET);
+          if (xctn.addrmode != CCR_ADMODE_NONE)
+            {
+              qspi_putreg(priv, xctn.addr, STM32_QUADSPI_AR_OFFSET);
+            }
 
           /* Enable 'Transfer Error' 'FIFO Threshhold' and
            * 'Transfer Complete' interrupts
@@ -2275,19 +2277,17 @@ static int qspi_memory(struct qspi_dev_s *dev,
   else
     {
       uint32_t regval;
-      uint32_t addrval;
 
-      addrval = qspi_getreg(priv, STM32_QUADSPI_AR_OFFSET);
-
-      /* Set up the Communications Configuration Register as per command
-       * info
+      /* Load the new address before switching to indirect read mode.
+       * Changing CCR in read mode can start a transfer using the old AR.
        */
 
-      qspi_ccrconfig(priv, &xctn, CCR_FMODE_INDRD);
-
-      /* Start the transfer by re-writing the address in AR register */
-
-      qspi_putreg(priv, addrval, STM32_QUADSPI_AR_OFFSET);
+      qspi_ccrconfig(priv, &xctn, CCR_FMODE_INDWR);
+      regval  = qspi_getreg(priv, STM32_QUADSPI_CCR_OFFSET);
+      regval &= ~QSPI_CCR_FMODE_MASK;
+      regval |= QSPI_CCR_FMODE(CCR_FMODE_INDRD);
+      qspi_putreg(priv, regval, STM32_QUADSPI_CCR_OFFSET);
+      qspi_putreg(priv, xctn.addr, STM32_QUADSPI_AR_OFFSET);
 
       /* Enable 'Transfer Error' 'FIFO Threshhold' and 'Transfer Complete'
        * interrupts
@@ -2571,13 +2571,16 @@ struct qspi_dev_s *stm32_qspi_initialize(int intf)
 
   if (intf == 0)
     {
-      /* If this function is called multiple times, the following operations
-       * will be performed multiple times.
-       */
-
       /* Select QSPI0 */
 
       priv = &g_qspi0dev;
+
+      /* Do not reset a controller that is already in use. */
+
+      if (priv->initialized)
+        {
+          return &priv->qspi;
+        }
 
       /* Select QSPI clock source */
 
