@@ -45,6 +45,7 @@
 #include <nuttx/clock.h>
 #include <nuttx/cache.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/irq.h>
 #include <nuttx/mutex.h>
 #include <nuttx/nuttx.h>
 #include <nuttx/semaphore.h>
@@ -1358,6 +1359,41 @@ static int qspi0_interrupt(int irq, void *context, void *arg)
   return OK;
 }
 
+/****************************************************************************
+ * Name: qspi_waittransfer
+ *
+ * Description:
+ *   Keep the interrupt transaction alive across signals.  Stop hardware
+ *   before returning a cancellation or other wait error to the caller.
+ *
+ ****************************************************************************/
+
+static int qspi_waittransfer(struct stm32h7_qspidev_s *priv)
+{
+  irqstate_t flags;
+  uint32_t regval;
+  int ret;
+
+  ret = nxsem_wait_uninterruptible(&priv->op_sem);
+  if (ret < 0)
+    {
+      flags = enter_critical_section();
+      regval = qspi_getreg(priv, STM32_QUADSPI_CR_OFFSET);
+      regval &= ~(QSPI_CR_TEIE | QSPI_CR_TCIE | QSPI_CR_FTIE);
+      qspi_putreg(priv, regval, STM32_QUADSPI_CR_OFFSET);
+      qspi_abort(priv);
+      nxsem_reset(&priv->op_sem, 0);
+      priv->xctn = NULL;
+      leave_critical_section(flags);
+      return ret;
+    }
+
+  UP_MB();
+  ret = priv->xctn->disposition;
+  priv->xctn = NULL;
+  return ret;
+}
+
 #elif defined(CONFIG_STM32_QSPI_DMA)
 /****************************************************************************
  * Name: qspi_dma_timeout
@@ -2144,12 +2180,7 @@ static int qspi_command(struct qspi_dev_s *dev,
 
   /* Wait for the interrupt routine to finish it's magic */
 
-  nxsem_wait(&priv->op_sem);
-  UP_MB();
-
-  /* Convey the result */
-
-  ret = xctn.disposition;
+  ret = qspi_waittransfer(priv);
 
   /* because command transfers are so small, we're not going to use
    * DMA for them, only interrupts or polling
@@ -2300,12 +2331,7 @@ static int qspi_memory(struct qspi_dev_s *dev,
 
   /* Wait for the interrupt routine to finish it's magic */
 
-  nxsem_wait(&priv->op_sem);
-  UP_MB();
-
-  /* convey the result */
-
-  ret = xctn.disposition;
+  ret = qspi_waittransfer(priv);
 
 #elif defined(CONFIG_STM32_QSPI_DMA)
   /* Can we perform DMA?  Should we perform DMA? */
