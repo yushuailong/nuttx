@@ -338,14 +338,6 @@ static mutex_t g_init_lock = NXMUTEX_INITIALIZER;
 static bool cdcuart_txready(FAR struct uart_dev_s *dev)
 {
   FAR struct cdcacm_dev_s *priv = dev->priv;
-  FAR struct usbdev_ep_s *ep = priv->epbulkin;
-
-  if (sq_empty(&priv->txfree))
-    {
-      priv->ispolling = true;
-      EP_POLL(ep);
-      priv->ispolling = false;
-    }
 
   return !sq_empty(&priv->txfree);
 }
@@ -379,6 +371,12 @@ static ssize_t cdcuart_sendbuf(FAR struct uart_dev_s *dev,
 
   flags = spin_lock_irqsave(&priv->lock);
   wrcontainer = (FAR struct cdcacm_wrreq_s *)sq_remfirst(&priv->txfree);
+  if (wrcontainer == NULL)
+    {
+      spin_unlock_irqrestore(&priv->lock, flags);
+      return -EAGAIN;
+    }
+
   req = wrcontainer->req;
   priv->nwrq--;
   spin_unlock_irqrestore(&priv->lock, flags);
@@ -400,6 +398,10 @@ static ssize_t cdcuart_sendbuf(FAR struct uart_dev_s *dev,
     {
       usbtrace(TRACE_CLSERROR(USBSER_TRACEERR_SUBMITFAIL),
                (uint16_t)-ret);
+      flags = spin_lock_irqsave(&priv->lock);
+      sq_addfirst((FAR sq_entry_t *)wrcontainer, &priv->txfree);
+      priv->nwrq++;
+      spin_unlock_irqrestore(&priv->lock, flags);
       return ret;
     }
 
@@ -3197,6 +3199,7 @@ ssize_t cdcacm_write(FAR const char *buffer, size_t buflen)
 {
   FAR struct cdcacm_dev_s *priv = g_syslog_cdcacm;
   size_t len = 0;
+  ssize_t ret;
 
   while (len < buflen)
     {
@@ -3205,18 +3208,22 @@ ssize_t cdcacm_write(FAR const char *buffer, size_t buflen)
           return -EINVAL;
         }
 
-      if (cdcuart_txready(&priv->serdev))
-        {
-          ssize_t ret = cdcuart_sendbuf(&priv->serdev,
-                                        buffer + len,
-                                        buflen - len);
-          if (ret < 0)
-            {
-              return ret;
-            }
+      /* Syslog may run with interrupts disabled.  Do not wait for USB
+       * completion or poll the controller recursively when TX is full.
+       */
 
-          len += ret;
+      if (!cdcuart_txready(&priv->serdev))
+        {
+          return len > 0 ? (ssize_t)len : -EAGAIN;
         }
+
+      ret = cdcuart_sendbuf(&priv->serdev, buffer + len, buflen - len);
+      if (ret <= 0)
+        {
+          return len > 0 ? (ssize_t)len : (ret < 0 ? ret : -EAGAIN);
+        }
+
+      len += ret;
     }
 
   return buflen;
