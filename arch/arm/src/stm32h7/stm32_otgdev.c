@@ -434,12 +434,15 @@ enum stm32_ep0state_e
                             *   TESTED: In stm32_epin() to see if we should
                             *           revert to SETUP processing.
                             */
-  EP0STATE_DATA_OUT        /* Waiting for data in phase to complete ( with a
+  EP0STATE_DATA_OUT,       /* Waiting for data in phase to complete ( with a
                             * USB request)
                             *   SET:    In stm32_epout_request() when a read
                             *           request is processed on EP0.
                             *   TESTED: In stm32_epout() to see if we should
                             *           revert to SETUP processing
+                            */
+  EP0STATE_STATUS_OUT      /* IN data received; waiting for the host's OUT
+                            * status stage before completing the request.
                             */
 };
 
@@ -1365,7 +1368,9 @@ static void stm32_epin_request(struct stm32_usbdev_s *priv,
                */
 
               if (bytesleft ==  privep->ep.maxpacket &&
-                 (privreq->req.flags & USBDEV_REQFLAGS_NULLPKT) != 0)
+                 (privreq->req.flags & USBDEV_REQFLAGS_NULLPKT) != 0 &&
+                 (privep->epphy != EP0 ||
+                  privreq->req.len < GETUINT16(priv->ctrlreq.len)))
                 {
                   /* The ZLP flag is set TRUE whenever we want to force
                    * the driver to send a zero-length-packet on the next
@@ -1465,7 +1470,8 @@ static void stm32_epin_request(struct stm32_usbdev_s *priv,
    * finished with the transfer
    */
 
-  if (privreq->req.xfrd >= privreq->req.len && !privep->zlp)
+  if (privep->epphy != EP0 &&
+      privreq->req.xfrd >= privreq->req.len && !privep->zlp)
     {
       usbtrace(TRACE_COMPLETE(privep->epphy), privreq->req.xfrd);
 
@@ -2733,6 +2739,9 @@ static inline void stm32_epout(struct stm32_usbdev_s *priv, uint8_t epno)
 
   if (epno == 0)
     {
+      struct stm32_ep_s *epin = &priv->epin[EP0];
+      struct stm32_req_s *privreq = stm32_rqpeek(epin);
+
       privep = &priv->epout[EP0];
 
       /* In the EP0STATE_DATA_OUT state, we are receiving data into the
@@ -2740,7 +2749,22 @@ static inline void stm32_epout(struct stm32_usbdev_s *priv, uint8_t epno)
        * processing.
        */
 
-      if (priv->ep0state == EP0STATE_DATA_OUT)
+      if (priv->ep0state == EP0STATE_STATUS_OUT ||
+          (priv->ep0state == EP0STATE_DATA_IN &&
+           USB_REQ_ISIN(priv->ctrlreq.type) && privreq != NULL &&
+           privreq->req.xfrd >= privreq->req.len && !epin->zlp))
+        {
+          /* OUT status may arrive before the pending IN completion IRQ is
+           * serviced.  The handshake proves the final IN packet arrived.
+           */
+
+          stm32_putreg(OTG_DIEPINT_XFRC, STM32_OTG_DIEPINT(EP0));
+          epin->active = false;
+          stm32_req_complete(epin, OK);
+          stm32_ep0out_ctrlsetup(priv);
+          priv->ep0state = EP0STATE_IDLE;
+        }
+      else if (priv->ep0state == EP0STATE_DATA_OUT)
         {
           /* Continue processing data from the EP0 OUT request queue */
 
@@ -2960,6 +2984,26 @@ static inline void stm32_epin(struct stm32_usbdev_s *priv, uint8_t epno)
 
       if (priv->ep0state == EP0STATE_DATA_IN)
         {
+          struct stm32_req_s *privreq = stm32_rqpeek(privep);
+
+          /* EP0 completion must mean that the host received the response,
+           * not merely that its last packet was copied into the TxFIFO.
+           */
+
+          if (privreq != NULL &&
+              privreq->req.xfrd >= privreq->req.len && !privep->zlp)
+            {
+              if (USB_REQ_ISIN(priv->ctrlreq.type))
+                {
+                  priv->ep0state = EP0STATE_STATUS_OUT;
+                  privep->active = false;
+                  stm32_ep0out_ctrlsetup(priv);
+                  return;
+                }
+
+              stm32_req_complete(privep, OK);
+            }
+
           /* Continue processing data from the EP0 OUT request queue */
 
           stm32_epin_request(priv, privep);
