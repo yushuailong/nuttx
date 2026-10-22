@@ -65,9 +65,11 @@ and the host both allow it:
 
 #. **Identification.** ``CLOCK_IDMODE``, below 400kHz, while the card is
    identified and its CID and CSD are read.
-#. **Bus width.** If the card's SCR says it supports four bits and the host
-   did not report ``SDIO_CAPS_1BIT_ONLY``, ACMD6 widens the bus and the clock
-   moves to ``CLOCK_SD_TRANSFER_4BIT``. Otherwise the card stays at
+#. **Bus width.** For a normal SD card, the host must report
+   ``SDIO_CAPS_4BIT`` before the upper half attempts four bit negotiation.
+   If the card's SCR also supports four bits and the host did not report
+   ``SDIO_CAPS_1BIT_ONLY``, ACMD6 widens the bus and the clock moves to
+   ``CLOCK_SD_TRANSFER_4BIT``. Otherwise the card stays at
    ``CLOCK_SD_TRANSFER_1BIT``.
 #. **High speed timing.** See below.
 

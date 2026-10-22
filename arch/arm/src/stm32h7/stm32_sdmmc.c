@@ -250,8 +250,7 @@
 
 /* Timing */
 
-#define SDMMC_CMDTIMEOUT         (100000)
-#define SDMMC_LONGTIMEOUT        (0x7fffffff)
+#define SDMMC_CMDTIMEOUT         MSEC2TICK(100)
 
 /* DTIMER setting */
 
@@ -375,6 +374,7 @@ struct stm32_dev_s
   uint32_t           waitmask;        /* Interrupt enables for event waiting */
   volatile sdio_eventset_t wkupevent; /* The event that caused the wakeup */
   struct wdog_s      waitwdog;        /* Watchdog that handles event timeouts */
+  uint32_t           waittimeout;     /* Transfer wait timeout in milliseconds */
 
   /* Callback support */
 
@@ -2107,6 +2107,7 @@ static void stm32_reset(struct sdio_dev_s *dev)
   priv->waitevents = 0;      /* Set of events to be waited for */
   priv->waitmask   = 0;      /* Interrupt enables for event waiting */
   priv->wkupevent  = 0;      /* The event that caused the wakeup */
+  priv->waittimeout = 0;     /* No pending transfer wait */
 
   wd_cancel(&priv->waitwdog); /* Cancel any timeouts */
 
@@ -2162,6 +2163,10 @@ static sdio_capset_t stm32_capabilities(struct sdio_dev_s *dev)
   if (priv->onebit)
     {
       caps |= SDIO_CAPS_1BIT_ONLY;
+    }
+  else
+    {
+      caps |= SDIO_CAPS_4BIT;
     }
 
   caps |= SDIO_CAPS_DMABEFOREWRITE;
@@ -2704,14 +2709,13 @@ static int stm32_cancel(struct sdio_dev_s *dev)
 static int stm32_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
-  int32_t timeout;
+  clock_t start;
   uint32_t events;
 
   switch (cmd & MMCSD_RESPONSE_MASK)
     {
       case MMCSD_NO_RESPONSE:
         events  = STM32_SDMMC_CMDDONE_STA;
-        timeout = SDMMC_CMDTIMEOUT;
         break;
 
       case MMCSD_R1_RESPONSE:
@@ -2721,24 +2725,24 @@ static int stm32_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
       case MMCSD_R5_RESPONSE:
       case MMCSD_R6_RESPONSE:
         events  = STM32_SDMMC_RESPDONE_STA;
-        timeout = SDMMC_LONGTIMEOUT;
         break;
 
       case MMCSD_R3_RESPONSE:
       case MMCSD_R7_RESPONSE:
         events  = STM32_SDMMC_RESPDONE_STA;
-        timeout = SDMMC_CMDTIMEOUT;
         break;
 
       default:
         return -EINVAL;
     }
 
-  /* Then wait for the response (or timeout) */
+  /* Bound a missing hardware completion by elapsed time, not CPU speed. */
 
+  start = clock_systime_ticks();
   while ((sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) & events) == 0)
     {
-      if (--timeout <= 0)
+      if (clock_systime_ticks() - start >= SDMMC_CMDTIMEOUT &&
+          (sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) & events) == 0)
         {
           mcerr("ERROR: Timeout cmd: %08" PRIx32 " events: %08" PRIx32
                 " STA: %08" PRIx32 "\n",
@@ -2748,7 +2752,16 @@ static int stm32_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
         }
     }
 
-  sdmmc_putreg32(priv, events, STM32_SDMMC_ICR_OFFSET);
+  /* Response readers need the timeout/CRC flags.  They clear these after
+   * checking the response.  Only no-response commands are complete here.
+   */
+
+  if ((cmd & MMCSD_RESPONSE_MASK) == MMCSD_NO_RESPONSE)
+    {
+      sdmmc_putreg32(priv, STM32_SDMMC_CMDDONE_ICR,
+                     STM32_SDMMC_ICR_OFFSET);
+    }
+
   return OK;
 }
 
@@ -3011,6 +3024,8 @@ static void stm32_waitenable(struct sdio_dev_s *dev,
   /* Disable event-related interrupts */
 
   stm32_configwaitints(priv, 0, 0, 0);
+  wd_cancel(&priv->waitwdog);
+  priv->waittimeout = timeout;
 
   /* Select the interrupt mask that will give us the appropriate wakeup
    * interrupts.
@@ -3069,15 +3084,22 @@ static void stm32_waitenable(struct sdio_dev_s *dev,
           return;
         }
 
-      /* Start the watchdog timer */
+      /* Transfer setup and command submission may be preempted.  Start
+       * their software wait timeout in eventwait, after submission.
+       * The data path also has a hardware timeout while it is active.
+       * Other waits, including write-busy detection, start immediately.
+       */
 
-      delay = MSEC2TICK(timeout);
-      ret   = wd_start(&priv->waitwdog, delay,
-                       stm32_eventtimeout, (wdparm_t)priv);
-      if (ret < OK)
+      if ((priv->waitevents & SDIOWAIT_TRANSFERDONE) == 0)
         {
-          mcerr("ERROR: wd_start failed: %d\n", ret);
-          stm32_endwait(priv, SDIOWAIT_ERROR);
+          delay = MSEC2TICK(timeout);
+          ret   = wd_start(&priv->waitwdog, delay,
+                           stm32_eventtimeout, (wdparm_t)priv);
+          if (ret < OK)
+            {
+              mcerr("ERROR: wd_start failed: %d\n", ret);
+              stm32_endwait(priv, SDIOWAIT_ERROR);
+            }
         }
     }
 
@@ -3150,6 +3172,18 @@ static sdio_eventset_t stm32_eventwait(struct sdio_dev_s *dev)
         }
     }
 #endif
+
+  if ((priv->waitevents & (SDIOWAIT_TRANSFERDONE | SDIOWAIT_TIMEOUT)) ==
+      (SDIOWAIT_TRANSFERDONE | SDIOWAIT_TIMEOUT) && priv->wkupevent == 0)
+    {
+      ret = wd_start(&priv->waitwdog, MSEC2TICK(priv->waittimeout),
+                      stm32_eventtimeout, (wdparm_t)priv);
+      if (ret < OK)
+        {
+          mcerr("ERROR: wd_start failed: %d\n", ret);
+          stm32_endwait(priv, SDIOWAIT_ERROR);
+        }
+    }
 
   /* Loop until the event (or the timeout occurs). Race conditions are
    * avoided by calling stm32_waitenable prior to triggering the logic that
