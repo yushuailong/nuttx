@@ -2749,10 +2749,11 @@ static inline void stm32_epout(struct stm32_usbdev_s *priv, uint8_t epno)
        * processing.
        */
 
-      if (priv->ep0state == EP0STATE_STATUS_OUT ||
-          (priv->ep0state == EP0STATE_DATA_IN &&
-           USB_REQ_ISIN(priv->ctrlreq.type) && privreq != NULL &&
-           privreq->req.xfrd >= privreq->req.len && !epin->zlp))
+      if (privreq != NULL &&
+          (priv->ep0state == EP0STATE_STATUS_OUT ||
+           (priv->ep0state == EP0STATE_DATA_IN &&
+            USB_REQ_ISIN(priv->ctrlreq.type) &&
+            privreq->req.xfrd >= privreq->req.len && !epin->zlp)))
         {
           /* OUT status may arrive before the pending IN completion IRQ is
            * serviced.  The handshake proves the final IN packet arrived.
@@ -4678,6 +4679,8 @@ static int stm32_ep_cancel(struct usbdev_ep_s *ep,
                            struct usbdev_req_s *req)
 {
   struct stm32_ep_s *privep = (struct stm32_ep_s *)ep;
+  struct stm32_usbdev_s *priv;
+  uint32_t regval;
   irqstate_t flags;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -4699,6 +4702,29 @@ static int stm32_ep_cancel(struct usbdev_ep_s *ep,
    */
 
   stm32_req_cancel(privep, -ESHUTDOWN);
+
+  /* A cancelled EP0 IN request may still be waiting for its data ACK or
+   * the host's OUT status packet.  Retire that state and any pending
+   * completion before accepting the next control request.
+   */
+
+  priv = privep->dev;
+  if (privep->epphy == EP0 && privep->isin &&
+      (priv->ep0state == EP0STATE_DATA_IN ||
+       priv->ep0state == EP0STATE_STATUS_OUT))
+    {
+      privep->active = false;
+      privep->zlp = false;
+      priv->ep0state = EP0STATE_IDLE;
+
+      regval = stm32_getreg(STM32_OTG_DIEPEMPMSK);
+      regval &= ~OTG_DIEPEMPMSK(EP0);
+      stm32_putreg(regval, STM32_OTG_DIEPEMPMSK);
+      stm32_putreg(OTG_DIEPINT_XFRC, STM32_OTG_DIEPINT(EP0));
+      stm32_putreg(OTG_DOEPINT_XFRC, STM32_OTG_DOEPINT(EP0));
+      stm32_ep0out_ctrlsetup(priv);
+    }
+
   leave_critical_section(flags);
   return OK;
 }
