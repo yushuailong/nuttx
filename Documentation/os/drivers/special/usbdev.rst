@@ -51,10 +51,12 @@ USB Device-Side Drivers
 Control OUT Data Buffering
 ==========================
 
-``CONFIG_USBDEV_SETUP_MAXDATASIZE`` configures the buffer used by supporting
-device controllers for the data stage of host-to-device control requests.
-The default is 64 bytes.  Some controllers retain a larger minimum buffer
-to preserve their existing behavior.
+``CONFIG_USBDEV_SETUP_MAXDATASIZE`` configures the STM32H7 device controller
+buffer for the data stage of host-to-device control requests.  The default
+is 64 bytes.  The option can only be increased on STM32H7; other controllers
+retain the default value and any larger minimum buffer required to preserve
+their existing behavior.  Larger values saved for other controllers revert
+to the default when the configuration is regenerated.
 
 The STM32H7 OTG device driver assembles multiple EP0 OUT packets before
 dispatching a control request to the class driver.  Set this option to at
