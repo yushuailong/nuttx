@@ -1629,8 +1629,11 @@ static inline void stm32_ep0out_rearm(struct stm32_usbdev_s *priv)
       remaining = CONFIG_USBDEV_EP0_MAXSIZE;
     }
 
+  /* Keep SETUP reception armed so a new request can abort this data stage. */
+
   regval = ((uint32_t)remaining << OTG_DOEPTSIZ0_XFRSIZ_SHIFT) |
-           OTG_DOEPTSIZ0_PKTCNT;
+           OTG_DOEPTSIZ0_PKTCNT |
+           (3 << OTG_DOEPTSIZ0_STUPCNT_SHIFT);
   stm32_putreg(regval, STM32_OTG_DOEPTSIZ(0));
 
   regval = stm32_getreg(STM32_OTG_DOEPCTL(0));
