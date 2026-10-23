@@ -123,6 +123,10 @@ void stm32_mpuinitialize(void)
   mpu_priv_shmem((uintptr_t)STM32_SHMEM_BASE, STM32_SHMEM_SIZE);
 #endif
 
+#ifdef CONFIG_STM32_MPU_BOARD_INIT
+  stm32_board_mpuinitialize();
+#endif
+
   /* Then enable the MPU */
 
   mpu_control(true, false, true);

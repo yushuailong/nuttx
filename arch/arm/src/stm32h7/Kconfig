@@ -7,6 +7,15 @@ if ARCH_CHIP_STM32H7
 
 comment "STM32 H7 Configuration Options"
 
+config STM32_MPU_BOARD_INIT
+	bool "Board-specific MPU regions"
+	depends on ARM_MPU
+	default n
+	---help---
+		Call stm32_board_mpuinitialize() after the architecture regions
+		are configured and before enabling the MPU. The board supplies
+		additional memory attributes, for example for external SDRAM.
+
 config STM32_H7_BOOTFLASH
 	bool
 	default n

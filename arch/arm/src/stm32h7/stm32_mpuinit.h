@@ -61,6 +61,10 @@ void stm32_mpuinitialize(void);
 #  define stm32_mpuinitialize()
 #endif
 
+#ifdef CONFIG_STM32_MPU_BOARD_INIT
+void stm32_board_mpuinitialize(void);
+#endif
+
 /****************************************************************************
  * Name: stm32_mpu_uheap
  *
