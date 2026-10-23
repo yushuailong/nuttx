@@ -135,6 +135,7 @@ struct stm32_dmach_s
   uint8_t        ctrl:3;    /* DMA controller */
   uint8_t        chan:5;    /* DMA stream/channel channel id */
   uint8_t        irq;       /* DMA stream IRQ number */
+  uint8_t        request;   /* MDMA hardware request */
   uint8_t        shift;     /* ISR/IFCR bit shift value */
   uint32_t       base;      /* DMA register channel base address */
   dma_callback_t callback;  /* Callback invoked when the DMA completes */
@@ -547,7 +548,7 @@ static struct stm32_dmach_s g_dmach[DMA_NCHANNELS] =
       .chan     = 14,
       .irq      = STM32_IRQ_MDMA,
       .shift    = 0,
-      .base     = STM32_MDMA_BASE + STM32_MDMA_OFFSET(15),
+      .base     = STM32_MDMA_BASE + STM32_MDMA_OFFSET(14),
     },
 
     {
@@ -936,7 +937,17 @@ static void stm32_mdma_disable(DMA_CHANNEL dmachan)
 
   DEBUGASSERT(controller == MDMA);
 
-#warning stm32_mdma_disable
+  dmachan_modifyreg32(dmachan, STM32_MDMACH_CCR_OFFSET,
+                      MDMA_CCR_EN, 0);
+  while ((dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET) &
+          MDMA_CCR_EN) != 0)
+    {
+    }
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, 0);
+  dmachan_putreg(dmachan, STM32_MDMACH_CIFCR_OFFSET, 0x1f);
+  dmachan->callback = NULL;
+  dmachan->arg = NULL;
 }
 
 /****************************************************************************
@@ -949,7 +960,38 @@ static void stm32_mdma_disable(DMA_CHANNEL dmachan)
 
 static int stm32_mdma_interrupt(int irq, void *context, void *arg)
 {
-#warning stm32_mdma_interrupt
+  DMA_CHANNEL dmachan;
+  dma_callback_t callback;
+  void *cbarg;
+  uint32_t status;
+  uint8_t result;
+  unsigned int i;
+
+  /* All MDMA channels share one vector. The attached channel argument
+   * cannot identify the channel that actually raised the interrupt.
+   */
+
+  for (i = MDMA_FIRST; i < MDMA_LAST; i++)
+    {
+      dmachan = &g_dmach[i];
+      status = dmachan_getreg(dmachan, STM32_MDMACH_CISR_OFFSET);
+      if ((status & (MDMA_INT_TEIF | MDMA_INT_CTCIF)) == 0)
+        {
+          continue;
+        }
+
+      callback = dmachan->callback;
+      cbarg = dmachan->arg;
+      result = (status & MDMA_INT_TEIF) != 0 ?
+               DMA_STATUS_TEIF : DMA_STATUS_TCIF;
+      stm32_mdma_disable(dmachan);
+      if (callback != NULL)
+        {
+          callback(dmachan, result, cbarg);
+        }
+    }
+
+  return OK;
 }
 
 /****************************************************************************
@@ -965,9 +1007,41 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
   DMA_CHANNEL dmachan    = (DMA_CHANNEL)handle;
   uint8_t     controller = dmachan->ctrl;
 
+  uint32_t bus = dmachan->request;
+
   DEBUGASSERT(controller == MDMA);
 
-#warning stm32_mdma_setup not implemented
+  /* For MDMA paddr is the source, maddr the destination and ndata is
+   * measured in bytes. cfg1 is CCR and cfg2 is CTCR.
+   */
+
+  DEBUGASSERT(cfg->ndata > 0 &&
+              cfg->ndata <= MDMA_CBNDTR_BNDT_MASK);
+  stm32_mdma_disable(dmachan);
+  if ((cfg->paddr & 0xff000000) == 0x20000000 ||
+      (cfg->paddr & 0xff000000) == 0)
+    {
+      bus |= MDMA_TSEL_SBUS;
+    }
+
+  if ((cfg->maddr & 0xff000000) == 0x20000000 ||
+      (cfg->maddr & 0xff000000) == 0)
+    {
+      bus |= MDMA_TSEL_DBUS;
+    }
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET,
+                 cfg->cfg1 & (MDMA_CCR_PL_MASK | MDMA_CCR_BEX |
+                              MDMA_CCR_HEX | MDMA_CCR_WEX));
+  dmachan_putreg(dmachan, STM32_MDMACH_CTCR_OFFSET, cfg->cfg2);
+  dmachan_putreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET, cfg->ndata);
+  dmachan_putreg(dmachan, STM32_MDMACH_CSAR_OFFSET, cfg->paddr);
+  dmachan_putreg(dmachan, STM32_MDMACH_CDAR_OFFSET, cfg->maddr);
+  dmachan_putreg(dmachan, STM32_MDMACH_CTBR_OFFSET, bus);
+  dmachan_putreg(dmachan, STM32_MDMACH_CBRUR_OFFSET, 0);
+  dmachan_putreg(dmachan, STM32_MDMACH_CLAR_OFFSET, 0);
+  dmachan_putreg(dmachan, STM32_MDMACH_CMAR_OFFSET, 0);
+  dmachan_putreg(dmachan, STM32_MDMACH_CMDR_OFFSET, 0);
 }
 
 /****************************************************************************
@@ -982,7 +1056,7 @@ static void stm32_mdma_free(DMA_HANDLE handle)
 {
   DMA_CHANNEL dmachan = (DMA_CHANNEL)handle;
 
-  dmachan_putreg(dmachan, STM32_BDMACH_CNDTR_OFFSET, 0);
+  stm32_mdma_disable(dmachan);
 }
 
 /****************************************************************************
@@ -998,9 +1072,24 @@ static void stm32_mdma_start(DMA_HANDLE handle, dma_callback_t callback,
   DMA_CHANNEL dmachan    = (DMA_CHANNEL)handle;
   uint8_t     controller = dmachan->ctrl;
 
+  uint32_t control;
+
   DEBUGASSERT(controller == MDMA);
 
-#warning stm32_mdma_start not implemented
+  DEBUGASSERT(!half);
+  dmachan->callback = callback;
+  dmachan->arg = arg;
+  dmachan_putreg(dmachan, STM32_MDMACH_CIFCR_OFFSET, 0x1f);
+  control = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
+  control |= MDMA_CCR_EN | MDMA_CCR_TEIE | MDMA_CCR_CTCIE;
+  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, control);
+
+  if ((dmachan_getreg(dmachan, STM32_MDMACH_CTCR_OFFSET) &
+       MDMA_CTCR_SWRM) != 0)
+    {
+      dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET,
+                     control | MDMA_CCR_SWRQ);
+    }
 }
 
 /****************************************************************************
@@ -1031,15 +1120,35 @@ static size_t stm32_mdma_residual(DMA_HANDLE handle)
 #ifdef CONFIG_STM32_DMACAPABLE
 static bool stm32_mdma_capable(stm32_dmacfg_t *cfg)
 {
-  uint32_t transfer_size;
-  uint32_t mend;
-  uint32_t ccr  = cfg->cfg1;
-  uint32_t ctcr = cfg->cfg2;
+  unsigned int source_shift;
+  unsigned int destination_shift;
 
-  dmainfo("0x%08" PRIx32 "/%" PRIu32 " 0x%08" PRIx32 " 0x%08" PRIx32 "\n",
-          cfg->maddr, cfg->ndata, ccr, ctcr);
+  if (cfg->ndata == 0 || cfg->ndata > MDMA_CBNDTR_BNDT_MASK)
+    {
+      return false;
+    }
 
-#warning stm32_mdma_capable not implemented
+  source_shift = (cfg->cfg2 & MDMA_CTCR_SSIZE_MASK) >>
+                 MDMA_CTCR_SSIZE_SHIFT;
+  destination_shift = (cfg->cfg2 & MDMA_CTCR_DSIZE_MASK) >>
+                      MDMA_CTCR_DSIZE_SHIFT;
+  if ((cfg->paddr & ((1u << source_shift) - 1)) != 0 ||
+      (cfg->maddr & ((1u << destination_shift) - 1)) != 0 ||
+      (cfg->ndata & ((1u << source_shift) - 1)) != 0 ||
+      (cfg->ndata & ((1u << destination_shift) - 1)) != 0)
+    {
+      return false;
+    }
+
+  /* Refuse wraparound before a client programs an incrementing block. */
+
+  if (((cfg->cfg2 & MDMA_CTCR_SINC_MASK) != MDMA_CTCR_SINC_FIXED &&
+       cfg->paddr > UINT32_MAX - cfg->ndata) ||
+      ((cfg->cfg2 & MDMA_CTCR_DINC_MASK) != MDMA_CTCR_DINC_FIXED &&
+       cfg->maddr > UINT32_MAX - cfg->ndata))
+    {
+      return false;
+    }
 
   return true;
 }
@@ -2467,6 +2576,8 @@ DMA_HANDLE stm32_dmachannel(unsigned int dmamap)
   DEBUGASSERT(dmachan->ctrl == controller);
 
   /* Get DMAMUX associated with DMA controller */
+
+  dmachan->request = dmamux_req;
 
   dmamux = g_dma[controller].dmamux;
 

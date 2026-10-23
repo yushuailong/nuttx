@@ -40,19 +40,19 @@
 #define STM32_MDMA_GISR0_OFFSET       0x0000 /* MDMA global interrupt/status register */
                                              /* 0x0004-0x003C: Reserved */
 
-#define STM32_MDMACH_CISR_OFFSET      0x0040
-#define STM32_MDMACH_CIFCR_OFFSET     0x0044
-#define STM32_MDMACH_CESR_OFFSET      0x0048
-#define STM32_MDMACH_CCR_OFFSET       0x004C
-#define STM32_MDMACH_CTCR_OFFSET      0x0050
-#define STM32_MDMACH_CBNDTR_OFFSET    0x0054
-#define STM32_MDMACH_CSAR_OFFSET      0x0058
-#define STM32_MDMACH_CDAR_OFFSET      0x005C
-#define STM32_MDMACH_CBRUR_OFFSET     0x0060
-#define STM32_MDMACH_CLAR_OFFSET      0x0064
-#define STM32_MDMACH_CTBR_OFFSET      0x0068
-#define STM32_MDMACH_CMAR_OFFSET      0x0070
-#define STM32_MDMACH_CMDR_OFFSET      0x0074
+#define STM32_MDMACH_CISR_OFFSET      0x0000
+#define STM32_MDMACH_CIFCR_OFFSET     0x0004
+#define STM32_MDMACH_CESR_OFFSET      0x0008
+#define STM32_MDMACH_CCR_OFFSET       0x000c
+#define STM32_MDMACH_CTCR_OFFSET      0x0010
+#define STM32_MDMACH_CBNDTR_OFFSET    0x0014
+#define STM32_MDMACH_CSAR_OFFSET      0x0018
+#define STM32_MDMACH_CDAR_OFFSET      0x001c
+#define STM32_MDMACH_CBRUR_OFFSET     0x0020
+#define STM32_MDMACH_CLAR_OFFSET      0x0024
+#define STM32_MDMACH_CTBR_OFFSET      0x0028
+#define STM32_MDMACH_CMAR_OFFSET      0x0030
+#define STM32_MDMACH_CMDR_OFFSET      0x0034
 
 #define STM32_MDMA_CXISR_OFFSET(x)    (0x0040+0x040*(x)) /* MDMA channel x interrupt/status register*/
 #define STM32_MDMA_C0ISR_OFFSET       STM32_MDMA_CXISR_OFFSET(0)
@@ -91,22 +91,22 @@
 #define STM32_MDMA_C15IFCR_OFFSET     STM32_MDMA_CXIFCR_OFFSET(15)
 
 #define STM32_MDMA_CXESR_OFFSET(x)    (0x0048+0x040*(x)) /* MDMA channel x error status register */
-#define STM32_MDMA_C0ESR_OFFSET       STM32_MDMA_CXESR_OFFSET0)
-#define STM32_MDMA_C1ESR_OFFSET       STM32_MDMA_CXESR_OFFSET1)
-#define STM32_MDMA_C2ESR_OFFSET       STM32_MDMA_CXESR_OFFSET2)
-#define STM32_MDMA_C3ESR_OFFSET       STM32_MDMA_CXESR_OFFSET3)
-#define STM32_MDMA_C4ESR_OFFSET       STM32_MDMA_CXESR_OFFSET4)
-#define STM32_MDMA_C5ESR_OFFSET       STM32_MDMA_CXESR_OFFSET5)
-#define STM32_MDMA_C6ESR_OFFSET       STM32_MDMA_CXESR_OFFSET6)
-#define STM32_MDMA_C7ESR_OFFSET       STM32_MDMA_CXESR_OFFSET7)
-#define STM32_MDMA_C8ESR_OFFSET       STM32_MDMA_CXESR_OFFSET8)
-#define STM32_MDMA_C9ESR_OFFSET       STM32_MDMA_CXESR_OFFSET9)
-#define STM32_MDMA_C10ESR_OFFSET      STM32_MDMA_CXESR_OFFSET10)
-#define STM32_MDMA_C11ESR_OFFSET      STM32_MDMA_CXESR_OFFSET11)
-#define STM32_MDMA_C12ESR_OFFSET      STM32_MDMA_CXESR_OFFSET12)
-#define STM32_MDMA_C13ESR_OFFSET      STM32_MDMA_CXESR_OFFSET13)
-#define STM32_MDMA_C14ESR_OFFSET      STM32_MDMA_CXESR_OFFSET14)
-#define STM32_MDMA_C15ESR_OFFSET      STM32_MDMA_CXESR_OFFSET15)
+#define STM32_MDMA_C0ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(0)
+#define STM32_MDMA_C1ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(1)
+#define STM32_MDMA_C2ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(2)
+#define STM32_MDMA_C3ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(3)
+#define STM32_MDMA_C4ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(4)
+#define STM32_MDMA_C5ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(5)
+#define STM32_MDMA_C6ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(6)
+#define STM32_MDMA_C7ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(7)
+#define STM32_MDMA_C8ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(8)
+#define STM32_MDMA_C9ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(9)
+#define STM32_MDMA_C10ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(10)
+#define STM32_MDMA_C11ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(11)
+#define STM32_MDMA_C12ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(12)
+#define STM32_MDMA_C13ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(13)
+#define STM32_MDMA_C14ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(14)
+#define STM32_MDMA_C15ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(15)
 
 #define STM32_MDMA_CXCR_OFFSET(x)     (0x004C+0x040*(x)) /* MDMA channel x control register */
 #define STM32_MDMA_C0CR_OFFSET        STM32_MDMA_CXCR_OFFSET(0)
@@ -501,40 +501,49 @@
  */
 
 #define MDMA_INT_TEIF             (1 << 0) /* Bit 0: Channel X transfer error flag */
-#define BDMA_INT_CTCIF            (1 << 1) /* Bit 1: Channel X transfer complete flag */
-#define BDMA_INT_BRTIF            (1 << 2) /* Bit 2: Channel X block repeat transfer complete flag */
-#define BDMA_INT_BTIF             (1 << 3) /* Bit 3: Channel X block transfer complete flag */
-#define BDMA_INT_TCIF             (1 << 4) /* Bit 4: Channel X buffer transfer complete interrupt flag */
-#define BDMA_INT_CRQA             (1 << 5) /* Bit 5: Channel X request active flag */
+#define MDMA_INT_CTCIF            (1 << 1) /* Bit 1: Channel X transfer complete flag */
+#define MDMA_INT_BRTIF            (1 << 2) /* Bit 2: Channel X block repeat transfer complete flag */
+#define MDMA_INT_BTIF             (1 << 3) /* Bit 3: Channel X block transfer complete flag */
+#define MDMA_INT_TCIF             (1 << 4) /* Bit 4: Channel X buffer transfer complete interrupt flag */
+#define MDMA_INT_CRQA             (1 << 5) /* Bit 5: Channel X request active flag */
 
 /* MDMA channel x error status register */
 
 #define MDMA_CESR_TEA_SHIFT       (0)      /* Bits 0-6: Transfer error address */
 #define MDMA_CESR_TEA_MASK        (0x7f << MDMA_CESR_TEA_SHIFT)
-#define MDMA_CESR_TED             (7)      /* Bit 7: Transfer error direction */
-#define MDMA_CESR_TELD            (8)      /* Bit 8: Transfer error link data */
-#define MDMA_CESR_TEMD            (9)      /* Bit 9: Transfer error mask data */
-#define MDMA_CESR_ASE             (10)     /* Bit 10: Address/size error */
-#define MDMA_CESR_BSE             (11)     /* Bit 11: Block size error */
+#define MDMA_CESR_TED             (1 << 7)      /* Bit 7: Transfer error direction */
+#define MDMA_CESR_TELD            (1 << 8)      /* Bit 8: Transfer error link data */
+#define MDMA_CESR_TEMD            (1 << 9)      /* Bit 9: Transfer error mask data */
+#define MDMA_CESR_ASE             (1 << 10)     /* Bit 10: Address/size error */
+#define MDMA_CESR_BSE             (1 << 11)     /* Bit 11: Block size error */
 
 /* MDMA channel x control register */
 
-#define MDMA_CCR_EN               (0)                      /* Bit 0: Channel enable / flag channel ready */
-#define MDMA_CCR_TEIE             (1)                      /* Bit 1: Transfer error interrupt enable */
-#define MDMA_CCR_CTCIE            (2)                      /* Bit 2: Channel transfer complete interrupt enable */
-#define MDMA_CCR_BRTIE            (3)                      /* Bit 3: Block repeat transfer interrupt enable */
-#define MDMA_CCR_BTIE             (4)                      /* Bit 4: Block transfer interrupt enable */
-#define MDMA_CCR_TCIE             (5)                      /* Bit 5: Buffer transfer complete interrupt enable */
+#define MDMA_CCR_EN               (1 << 0)               /* Bit 0: Channel enable / flag channel ready */
+#define MDMA_CCR_TEIE             (1 << 1)               /* Bit 1: Transfer error interrupt enable */
+#define MDMA_CCR_CTCIE            (1 << 2)               /* Bit 2: Channel transfer complete interrupt enable */
+#define MDMA_CCR_BRTIE            (1 << 3)               /* Bit 3: Block repeat transfer interrupt enable */
+#define MDMA_CCR_BTIE             (1 << 4)               /* Bit 4: Block transfer interrupt enable */
+#define MDMA_CCR_TCIE             (1 << 5)               /* Bit 5: Buffer transfer complete interrupt enable */
 #define MDMA_CCR_PL_SHIFT         (6)                      /* Bis 6-7: Priority level */
 #define MDMA_CCR_PL_MASK          (3 << MDMA_CCR_PL_SHIFT)
 #  define MDMA_CCR_PRILO          (0 << MDMA_CCR_PL_SHIFT) /* 00: Low */
 #  define MDMA_CCR_PRIMED         (1 << MDMA_CCR_PL_SHIFT) /* 01: Medium */
 #  define MDMA_CCR_PRIHI          (2 << MDMA_CCR_PL_SHIFT) /* 10: High */
 #  define MDMA_CCR_PRIVERYHI      (3 << MDMA_CCR_PL_SHIFT) /* 11: Very high */
-#define MDMA_CCR_BEX              (12)                     /* Bit 12: Byte endianness exchange */
-#define MDMA_CCR_HEX              (13)                     /* Bit 13: Half word endianness exchange */
-#define MDMA_CCR_WEX              (14)                     /* Bit 14: Word endianness exchange */
-#define MDMA_CCR_SWRQ             (16)                     /* Bit 16: Software request */
+
+/* Bit 12: Byte endianness exchange */
+
+#define MDMA_CCR_BEX              (1 << 12)
+/* Bit 13: Half word endianness exchange */
+
+#define MDMA_CCR_HEX              (1 << 13)
+/* Bit 14: Word endianness exchange */
+
+#define MDMA_CCR_WEX              (1 << 14)
+/* Bit 16: Software request */
+
+#define MDMA_CCR_SWRQ             (1 << 16)
 
 /* MDMA channel x transfer configuration register */
 
@@ -567,7 +576,7 @@
 #  define MDMA_CTCR_SINCOS_32BITS (2 << MDMA_CTCR_SINCOS_SHIFT) /* 10: */
 #  define MDMA_CTCR_SINCOS_64BITS (3 << MDMA_CTCR_SINCOS_SHIFT) /* 11: */
 #define MDMA_CTCR_DINCOS_SHIFT    (10)                          /* Bits 10-11: Destination increment offset size */
-#define MDMA_CTCR_DINCOS_MASK     (7 << MDMA_CTCR_DINCOS_SHIFT)
+#define MDMA_CTCR_DINCOS_MASK     (3 << MDMA_CTCR_DINCOS_SHIFT)
 #  define MDMA_CTCR_DINCOS_8BITS  (0 << MDMA_CTCR_DINCOS_SHIFT) /* 00: */
 #  define MDMA_CTCR_DINCOS_16BITS (1 << MDMA_CTCR_DINCOS_SHIFT) /* 01: */
 #  define MDMA_CTCR_DINCOS_32BITS (2 << MDMA_CTCR_DINCOS_SHIFT) /* 10: */
@@ -595,7 +604,7 @@
 #define MDMA_CTCR_TLEN_SHIFT      (18)                          /* Bits 18-24: Buffer transfer length - 1  */
 #define MDMA_CTCR_TLEN_MASK       (0x7f << MDMA_CTCR_TLEN_SHIFT)
 #  define MDMA_CTCR_TLEN(len)     (((len-1) << MDMA_CTCR_TLEN_SHIFT) & MDMA_CTCR_TLEN_MASK)
-#define MDMA_CTCR_PKE             (25)                          /* Bit 25: Pack enable */
+#define MDMA_CTCR_PKE             (1 << 25)              /* Bit 25: Pack enable */
 #define MDMA_CTCR_PAM_SHIFT       (26)                          /* Bits 26-27: Padding/alignment mode */
 #define MDMA_CTCR_PAM_MASK        (3 << MDMA_CTCR_PAM_SHIFT)
 #  define MDMA_CTCR_PAM_RIGHT     (0 << MDMA_CTCR_PAM_SHIFT)    /* 00: */
@@ -607,17 +616,22 @@
 #  define MDMA_CTCR_TRGM_BLOCK    (1 << MDMA_CTCR_TRGM_SHIFT)   /* 01: */
 #  define MDMA_CTCR_TRGM_RBLOCK   (2 << MDMA_CTCR_TRGM_SHIFT)   /* 10: */
 #  define MDMA_CTCR_TRGM_DATA     (3 << MDMA_CTCR_TRGM_SHIFT)   /* 11: */
-#define MDMA_CTCR_SWRM            (30)                          /* Bit 30: Software request mode */
-#define MDMA_CTCR_BWM             (31)                          /* Bit 31: Bufferable write mode */
+
+/* Bit 30: Software request mode */
+
+#define MDMA_CTCR_SWRM            (1 << 30)
+/* Bit 31: Bufferable write mode */
+
+#define MDMA_CTCR_BWM             (1u << 31)
 
 /* MDMA channel x block number of data register */
 
 #define MDMA_CBNDTR_BNDT_SHIFT    (0) /* Bits 0-16: Block number of data bytes to transfer */
 #define MDMA_CBNDTR_BNDT_MASK     (0x1ffff << MDMA_CBNDTR_BNDT_SHIFT)
-#define MDMA_CBNDTR_BRSUM         (18) /* Bit 18: Block repeat source address update mode */
-#define MDMA_CBNDTR_BRDUM         (19) /* Bit 19: Block repeat destination address update mode */
+#define MDMA_CBNDTR_BRSUM         (1 << 18) /* Bit 18: Block repeat source address update mode */
+#define MDMA_CBNDTR_BRDUM         (1 << 19) /* Bit 19: Block repeat destination address update mode */
 #define MDMA_CBNDTR_BRC_SHIFT     (20) /* Bits 20-31: Block repeat count */
-#define MDMA_CBNDTR_BRC_MASK      (0xfff << MDMA_CBNDTR_BNDT_SHIFT)
+#define MDMA_CBNDTR_BRC_MASK      (0xfff << MDMA_CBNDTR_BRC_SHIFT)
 
 /* MDMA channel x block repeat address update register */
 
@@ -630,7 +644,7 @@
 
 #define MDMA_TSEL_SHIFT           (0)  /* Bits 0-5: Trigger selection */
 #define MDMA_TSEL_MASK            (0x3f << MDMA_TSEL_SHIFT)
-#define MDMA_TSEL_SBUS            (16) /* Bit 16: Source BUS select */
-#define MDMA_TSEL_DBUS            (17) /* Bit 16: Destination BUS select */
+#define MDMA_TSEL_SBUS            (1 << 16) /* Bit 16: Source BUS select */
+#define MDMA_TSEL_DBUS            (1 << 17) /* Bit 16: Destination BUS select */
 
 #endif /* __ARCH_ARM_SRC_STM32H7_HARDWARE_STM32_MDMA_H */

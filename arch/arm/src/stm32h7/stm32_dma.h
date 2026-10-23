@@ -50,12 +50,15 @@
  * Public Types
  ****************************************************************************/
 
-/* DMA channel configuration - common for DMA1 DMA2 MDMA and BDMA */
+/* DMA channel configuration - common for DMA1 DMA2 MDMA and BDMA.
+ * MDMA supports a single block of 1..131071 bytes; linked lists and half
+ * transfer callbacks are not implemented.
+ */
 
 struct stm32_dma_config_s
 {
-  uint32_t paddr;      /* Peripheral address */
-  uint32_t maddr;      /* Memory address */
+  uint32_t paddr;      /* Peripheral address; MDMA source address */
+  uint32_t maddr;      /* Memory address; MDMA destination address */
   uint32_t cfg1;       /* DMA transfer configuration 1.
                         * Its function depends on DMA controller:
                         *   - DMA1 and DMA2 - SCR register configuration
@@ -66,7 +69,7 @@ struct stm32_dma_config_s
                         * Its function depends on DMA controller:
                         *   - MDMA - CTCR register configuration
                         */
-  uint32_t ndata;      /* Number of data to transfer */
+  uint32_t ndata;      /* Transfer elements; MDMA bytes (single block) */
 };
 
 typedef struct stm32_dma_config_s stm32_dmacfg_t;
