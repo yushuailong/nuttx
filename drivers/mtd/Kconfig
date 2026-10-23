@@ -895,6 +895,27 @@ config W25QXXXJV_QUAD_PROGRAM
 		four-byte addressing). The QSPI controller must support the
 		QUADDATA flag: single-line instruction/address, quad-line data.
 
+config W25QXXXJV_READY_TIMEOUT
+	int "Program and status timeout (milliseconds)"
+	default 5000
+	range 1 60000
+	---help---
+		Maximum time to wait for page programming, status writes or a
+		write-enable latch change. Transport errors return immediately.
+
+config W25QXXXJV_SECTOR_ERASE_TIMEOUT
+	int "Sector erase timeout (milliseconds)"
+	default 10000
+	range 1 600000
+
+config W25QXXXJV_CHIP_ERASE_TIMEOUT
+	int "Chip erase timeout (milliseconds)"
+	default 600000
+	range 1 3600000
+	---help---
+		Choose a limit appropriate for the attached Flash capacity and
+		its maximum erase time. Busy polling never retries indefinitely.
+
 config W25QXXXJV_SECTOR512
 	bool "Simulate 512 byte Erase Blocks"
 	default n
