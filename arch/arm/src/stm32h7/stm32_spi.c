@@ -1176,14 +1176,10 @@ static int spi_dmatxwait(struct stm32_spidev_s *priv)
       return OK;
     }
 
-  /* Enable TXC interrupt. This needs to be done after starting TX-dma AND
-   * when spi is enabled to avoid spurious TXC interrupt (ERRATA:
-   * "2.14.4 TXP interrupt occurring while SPI/I2Sdisabled")
-   * It is fine to enable this interrupt even if the transfer already did
-   * complete; in this case the irq will just fire right away
+  /* The DMA completion callback enables TXC only after the last write to
+   * TXDR. Enabling EOTIE here also enables SUSP interrupts while DMA is
+   * still running, and a stale SUSP flag can create an interrupt storm.
    */
-
-  spi_modifyreg(priv, STM32_SPI_IER_OFFSET, 0, SPI_IER_EOTIE);
 
   /* Take the semaphore (perhaps waiting).  If the result is zero, then the
    * DMA must not really have completed???
@@ -1303,6 +1299,32 @@ static void spi_dmarxsetup(struct stm32_spidev_s *priv,
 #endif
 
 /****************************************************************************
+ * Name: spi_dmatxcallback
+ ****************************************************************************/
+
+#ifdef CONFIG_STM32_SPI_DMA
+static void spi_dmatxcallback(DMA_HANDLE handle, uint8_t status, void *arg)
+{
+  struct stm32_spidev_s *priv = arg;
+
+  if ((status & DMA_STATUS_ERROR) != 0)
+    {
+      priv->txresult = status | 0x80;
+      nxsem_post(&priv->txsem);
+      return;
+    }
+
+  /* EOTIE combines EOT, SUSP and TXC. Clear the latched flags before
+   * waiting for the FIFO and final shift register to become empty.
+   */
+
+  spi_putreg(priv, STM32_SPI_IFCR_OFFSET,
+              SPI_IFCR_SUSPC | SPI_IFCR_EOTC | SPI_IFCR_TXTFC);
+  spi_modifyreg(priv, STM32_SPI_IER_OFFSET, 0, SPI_IER_EOTIE);
+}
+#endif
+
+/****************************************************************************
  * Name: spi_dmatxsetup
  *
  * Description:
@@ -1404,8 +1426,10 @@ static void spi_dmatxstart(struct stm32_spidev_s *priv)
       return;
     }
 
+  spi_modifyreg(priv, STM32_SPI_IER_OFFSET, SPI_IER_EOTIE, 0);
+  nxsem_reset(&priv->txsem, 0);
   priv->txresult = 0;
-  stm32_dmastart(priv->txdma, NULL, priv, false);
+  stm32_dmastart(priv->txdma, spi_dmatxcallback, priv, false);
   spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, 0, SPI_CFG1_TXDMAEN);
 }
 #endif
