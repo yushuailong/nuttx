@@ -189,7 +189,10 @@
 #  define QSPI_CCR_FMODE(n)        ((uint32_t)(n) << QSPI_CCR_FMODE_SHIFT)
 #define QSPI_CCR_SIOO              (1 << 28)   /* Bit 28:  Send instruction only once mode */
 #define QSPI_CCR_FRCM              (1 << 29)   /* Bit 28:  Enters Free running clock mode */
-#define QSPI_CCR_DDRM              (1 << 31)   /* Bit 31:  Double data rate mode */
+
+/* Bit 31: Double data rate mode */
+
+#define QSPI_CCR_DDRM              (1u << 31)
 
 /* Address Register */
 

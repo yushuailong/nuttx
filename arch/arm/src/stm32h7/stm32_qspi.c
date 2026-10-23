@@ -37,6 +37,8 @@
 #include <assert.h>
 #include <nuttx/debug.h>
 
+#include <sys/param.h>
+
 #include <arch/barriers.h>
 #include <arch/board/board.h>
 
@@ -55,6 +57,7 @@
 
 #include "stm32_gpio.h"
 #include "stm32_dma.h"
+#include "hardware/stm32_mdma.h"
 #include "stm32_rcc.h"
 #include "hardware/stm32_qspi.h"
 
@@ -96,26 +99,18 @@
 
 #ifdef CONFIG_STM32_QSPI_DMA
 
-#  ifdef DMAMAP_QUADSPI
-
-/* QSPI DMA Channel/Stream selection.  There
- * are multiple DMA stream options that must be dis-ambiguated in the board.h
- * file.
- */
-
-#    define DMACHAN_QUADSPI           DMAMAP_QUADSPI
-#  endif
+#  define DMACHAN_QUADSPI DMAP_MDMA_QUADSPI_FT
 
 #  if defined(CONFIG_STM32_QSPI_DMAPRIORITY_LOW)
-#    define QSPI_DMA_PRIO  DMA_SCR_PRILO
+#    define QSPI_DMA_PRIO  MDMA_CCR_PRILO
 #  elif defined(CONFIG_STM32_QSPI_DMAPRIORITY_MEDIUM)
-#    define QSPI_DMA_PRIO  DMA_SCR_PRIMED
+#    define QSPI_DMA_PRIO  MDMA_CCR_PRIMED
 #  elif defined(CONFIG_STM32_QSPI_DMAPRIORITY_HIGH)
-#    define QSPI_DMA_PRIO  DMA_SCR_PRIHI
+#    define QSPI_DMA_PRIO  MDMA_CCR_PRIHI
 #  elif defined(CONFIG_STM32_QSPI_DMAPRIORITY_VERYHIGH)
-#    define QSPI_DMA_PRIO  DMA_SCR_PRIVERYHI
+#    define QSPI_DMA_PRIO  MDMA_CCR_PRIVERYHI
 #  else
-#    define QSPI_DMA_PRIO  DMA_SCR_PRIMED
+#    define QSPI_DMA_PRIO  MDMA_CCR_PRIMED
 #  endif
 
 #endif /* CONFIG_STM32_QSPI_DMA */
@@ -202,14 +197,14 @@ struct stm32h7_qspidev_s
   sem_t dmawait;                /* Used to wait for DMA completion */
   int result;                   /* DMA result */
   DMA_HANDLE dmach;             /* QSPI DMA handle */
-  struct wdog_s dmadog;         /* Watchdog that handles DMA timeouts */
+
+  /* Receive bounce buffer owns complete cache lines. */
+
+  uint8_t dmabuffer[4096] aligned_data(32);
 #endif
 
   /* Debug stuff */
 
-#ifdef CONFIG_STM32_QSPI_DMADEBUG
-  struct stm32h7_dmaregs_s dmaregs[DMA_NSAMPLES];
-#endif
 
 #ifdef CONFIG_STM32_QSPI_REGDEBUG
   bool     wrlast;              /* Last was a write */
@@ -298,13 +293,9 @@ static int     qspi0_interrupt(int irq, void *context, void *arg);
 #ifdef CONFIG_STM32_QSPI_DMA
 
 #  ifdef CONFIG_STM32_QSPI_DMADEBUG
-#    define qspi_dma_sample(s,i) stm32h7_dmasample((s)->dmach, &(s)->dmaregs[i])
-static void     qspi_dma_sampleinit(struct stm32h7_qspidev_s *priv);
-static void     qspi_dma_sampledone(struct stm32h7_qspidev_s *priv);
+#    define qspi_dma_sample(s,i) stm32_dmadump((s)->dmach, #i)
 #  else
 #    define qspi_dma_sample(s,i)
-#    define qspi_dma_sampleinit(s)
-#    define qspi_dma_sampledone(s)
 #  endif
 
 #  ifndef CONFIG_STM32_QSPI_DMATHRESHOLD
@@ -650,94 +641,6 @@ static void qspi_dumpgpioconfig(const char *msg)
 }
 #endif
 
-#ifdef CONFIG_STM32_QSPI_DMADEBUG
-/****************************************************************************
- * Name: qspi_dma_sampleinit
- *
- * Description:
- *   Initialize sampling of DMA registers
- *
- * Input Parameters:
- *   priv - QSPI driver instance
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-static void qspi_dma_sampleinit(struct stm32h7_qspidev_s *priv)
-{
-  /* Put contents of register samples into a known state */
-
-  memset(priv->dmaregs, 0xff,
-         DMA_NSAMPLES * sizeof(struct stm32h7_dmaregs_s));
-
-  /* Then get the initial samples */
-
-  stm32h7_dmasample(priv->dmach, &priv->dmaregs[DMA_INITIAL]);
-}
-
-/****************************************************************************
- * Name: qspi_dma_sampledone
- *
- * Description:
- *   Dump sampled DMA registers
- *
- * Input Parameters:
- *   priv - QSPI driver instance
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-static void qspi_dma_sampledone(struct stm32h7_qspidev_s *priv)
-{
-  /* Sample the final registers */
-
-  stm32h7_dmasample(priv->dmach, &priv->dmaregs[DMA_END_TRANSFER]);
-
-  /* Then dump the sampled DMA registers */
-
-  /* Initial register values */
-
-  stm32h7_dmadump(priv->dmach, &priv->dmaregs[DMA_INITIAL],
-              "Initial Registers");
-
-  /* Register values after DMA setup */
-
-  stm32h7_dmadump(priv->dmach, &priv->dmaregs[DMA_AFTER_SETUP],
-              "After DMA Setup");
-
-  /* Register values after DMA start */
-
-  stm32h7_dmadump(priv->dmach, &priv->dmaregs[DMA_AFTER_START],
-              "After DMA Start");
-
-  /* Register values at the time of the TX and RX DMA callbacks
-   * -OR- DMA timeout.
-   *
-   * If the DMA timed out, then there will not be any RX DMA
-   * callback samples.  There is probably no TX DMA callback
-   * samples either, but we don't know for sure.
-   */
-
-  if (priv->result == -ETIMEDOUT)
-    {
-      stm32h7_dmadump(priv->dmach, &priv->dmaregs[DMA_TIMEOUT],
-                  "At DMA timeout");
-    }
-  else
-    {
-      stm32h7_dmadump(priv->dmach, &priv->dmaregs[DMA_CALLBACK],
-                  "At DMA callback");
-    }
-
-  stm32h7_dmadump(priv->dmach, &priv->dmaregs[DMA_END_TRANSFER],
-              "At End-of-Transfer");
-}
-#endif
-
 /****************************************************************************
  * Name: qspi_setupxctnfromcmd
  *
@@ -859,7 +762,7 @@ static int qspi_setupxctnfromcmd(struct qspi_xctnspec_s *xctn,
 
       /* XXX III double data rate option bits */
 
-      xctn->isddr = 0;
+      xctn->isddr = QSPICMD_ISDTR(cmdinfo->flags);
     }
   else
     {
@@ -897,6 +800,12 @@ static int qspi_setupxctnfrommem(struct qspi_xctnspec_s *xctn,
                                  const struct qspi_meminfo_s *meminfo)
 {
   DEBUGASSERT(xctn != NULL && meminfo != NULL);
+
+  if (meminfo->buffer == NULL || meminfo->buflen == 0 ||
+      meminfo->buflen - 1 > UINT32_MAX - meminfo->addr)
+    {
+      return -EINVAL;
+    }
 
 #ifdef CONFIG_DEBUG_SPI_INFO
   spiinfo("Transfer:\n");
@@ -996,7 +905,8 @@ static int qspi_setupxctnfrommem(struct qspi_xctnspec_s *xctn,
     {
       xctn->datamode = CCR_DMODE_DUAL;
     }
-  else if (QSPIMEM_ISQUADIO(meminfo->flags))
+  else if (QSPIMEM_ISQUADIO(meminfo->flags) ||
+           QSPIMEM_ISQUADDATA(meminfo->flags))
     {
       xctn->datamode = CCR_DMODE_QUAD;
     }
@@ -1009,7 +919,7 @@ static int qspi_setupxctnfrommem(struct qspi_xctnspec_s *xctn,
 
   /* XXX III double data rate option bits */
 
-  xctn->isddr = 0;
+  xctn->isddr = QSPIMEM_ISDTR(meminfo->flags);
 
 #if defined(CONFIG_STM32_QSPI_INTERRUPTS)
   xctn->function = QSPIMEM_ISWRITE(meminfo->flags) ? CCR_FMODE_INDWR :
@@ -1037,21 +947,28 @@ static int qspi_setupxctnfrommem(struct qspi_xctnspec_s *xctn,
  *
  ****************************************************************************/
 
-static void qspi_waitstatusflags(struct stm32h7_qspidev_s *priv,
-                                 uint32_t mask, int polarity)
+static int qspi_waitstatusflags(struct stm32h7_qspidev_s *priv,
+                                uint32_t mask, int polarity)
 {
-  uint32_t regval;
+  clock_t start = clock_systime_ticks();
+  uint32_t status;
 
-  if (polarity)
+  do
     {
-      while (!((regval = qspi_getreg(priv, STM32_QUADSPI_SR_OFFSET)) & mask))
-        ;
+      status = qspi_getreg(priv, STM32_QUADSPI_SR_OFFSET);
+      if (((status & mask) != 0) == (polarity != 0))
+        {
+          return OK;
+        }
+
+      if (mask != QSPI_SR_BUSY && (status & QSPI_SR_TEF) != 0)
+        {
+          return -EIO;
+        }
     }
-  else
-    {
-      while (((regval = qspi_getreg(priv, STM32_QUADSPI_SR_OFFSET)) & mask))
-        ;
-    }
+  while (clock_systime_ticks() - start < DMA_TIMEOUT_TICKS);
+
+  return -ETIMEDOUT;
 }
 
 /****************************************************************************
@@ -1124,8 +1041,8 @@ static void qspi_ccrconfig(struct stm32h7_qspidev_s *priv,
             QSPI_CCR_DCYC(xctn->dummycycles) |
             QSPI_CCR_DMODE(xctn->datamode) |
             QSPI_CCR_FMODE(fctn) |
-            (xctn->isddr ? QSPI_CCR_SIOO : 0) |
-            (xctn->issioo ? QSPI_CCR_DDRM : 0);
+            (xctn->isddr ? QSPI_CCR_DDRM : 0) |
+            (xctn->issioo ? QSPI_CCR_SIOO : 0);
   qspi_putreg(priv, regval, STM32_QUADSPI_CCR_OFFSET);
 
   /* If we have and need and address, set that now, too */
@@ -1396,98 +1313,14 @@ static int qspi_waittransfer(struct stm32h7_qspidev_s *priv)
 
 #elif defined(CONFIG_STM32_QSPI_DMA)
 /****************************************************************************
- * Name: qspi_dma_timeout
- *
- * Description:
- *   The watchdog timeout setup when a has expired without completion of a
- *   DMA.
- *
- * Input Parameters:
- *   arg    - The argument
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *   Always called from the interrupt level with interrupts disabled.
- *
- ****************************************************************************/
-
-static void qspi_dma_timeout(wdparm_t arg)
-{
-  struct stm32h7_qspidev_s *priv = (struct stm32h7_qspidev_s *)arg;
-  DEBUGASSERT(priv != NULL);
-
-  /* Sample DMA registers at the time of the timeout */
-
-  qspi_dma_sample(priv, DMA_CALLBACK);
-
-  /* Report timeout result, perhaps overwriting any failure reports from
-   * the TX callback.
-   */
-
-  priv->result = -ETIMEDOUT;
-
-  /* Then wake up the waiting thread */
-
-  nxsem_post(&priv->dmawait);
-}
-
-/****************************************************************************
  * Name: qspi_dma_callback
- *
- * Description:
- *   This callback function is invoked at the completion of the QSPI DMA.
- *
- * Input Parameters:
- *   handle - The DMA handler
- *   isr - source of the DMA interrupt
- *   arg - A pointer to the chip select structure
- *
- * Returned Value:
- *   None
- *
  ****************************************************************************/
 
 static void qspi_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
 {
-  struct stm32h7_qspidev_s *priv = (struct stm32h7_qspidev_s *)arg;
-  DEBUGASSERT(priv != NULL);
+  struct stm32h7_qspidev_s *priv = arg;
 
-  /* Cancel the watchdog timeout */
-
-  wd_cancel(&priv->dmadog);
-
-  /* Sample DMA registers at the time of the callback */
-
-  qspi_dma_sample(priv, DMA_CALLBACK);
-
-  /* Report the result of the transfer only if the callback has not already
-   * reported an error.
-   */
-
-  if (priv->result == -EBUSY)
-    {
-      /* Save the result of the transfer if no error was previously
-       * reported
-       */
-
-      if (isr & DMA_STREAM_TCIF_BIT)
-        {
-          priv->result = OK;
-        }
-      else if (isr & DMA_STREAM_TEIF_BIT)
-        {
-          priv->result = -EIO;
-        }
-      else
-        {
-          priv->result = OK;
-        }
-    }
-
-  /* Then wake up the waiting thread */
-
+  priv->result = (isr & DMA_STATUS_ERROR) != 0 ? -EIO : OK;
   nxsem_post(&priv->dmawait);
 }
 
@@ -1525,145 +1358,100 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
                            struct qspi_meminfo_s *meminfo,
                            struct qspi_xctnspec_s *xctn)
 {
-  uint32_t dmaflags;
+  stm32_dmacfg_t config =
+    {
+      0
+    };
+
+  uintptr_t buffer = (uintptr_t)meminfo->buffer;
+  uintptr_t datareg = qspi_regaddr(priv, STM32_QUADSPI_DR_OFFSET);
+  clock_t start;
+  uint32_t status;
   uint32_t regval;
   int ret;
 
-  /* Initialize register sampling */
-
-  qspi_dma_sampleinit(priv);
-
-  /* Determine DMA flags and setup the DMA */
-
+  config.cfg1 = QSPI_DMA_PRIO;
+  config.cfg2 = MDMA_CTCR_TLEN(CONFIG_STM32_QSPI_FIFO_THESHOLD);
+  config.ndata = meminfo->buflen;
   if (QSPIMEM_ISWRITE(meminfo->flags))
     {
-      /* Setup the DMA (memory-to-peripheral) */
-
-      dmaflags = (QSPI_DMA_PRIO | DMA_SCR_MSIZE_8BITS |
-                  DMA_SCR_PSIZE_8BITS | DMA_SCR_MINC | DMA_SCR_DIR_M2P);
-
-      up_clean_dcache((uintptr_t)meminfo->buffer,
-                      (uintptr_t)meminfo->buffer + meminfo->buflen);
+      config.paddr = buffer;
+      config.maddr = datareg;
+      config.cfg2 |= MDMA_CTCR_SINC_INCR;
+      up_clean_dcache(buffer, buffer + meminfo->buflen);
     }
   else
     {
-      /* Setup the DMA (peripheral-to-memory) */
-
-      dmaflags = (QSPI_DMA_PRIO | DMA_SCR_MSIZE_8BITS |
-                  DMA_SCR_PSIZE_8BITS | DMA_SCR_MINC | DMA_SCR_DIR_P2M);
+      config.paddr = datareg;
+      config.maddr = buffer;
+      config.cfg2 |= MDMA_CTCR_DINC_INCR;
+      up_invalidate_dcache(buffer, buffer + meminfo->buflen);
     }
 
-  stm32_dmasetup(priv->dmach, qspi_regaddr(priv, STM32_QUADSPI_DR_OFFSET),
-                 (uint32_t)meminfo->buffer, meminfo->buflen, dmaflags);
+  /* Configure MDMA while disabled. Switch QUADSPI into the requested
+   * direction before arming MDMA: the FIFO threshold can already be high
+   * in the previous indirect-write mode and must not start an early read.
+   * H743 has no DMAEN gate; the FIFO stalls safely until MDMA is enabled.
+   */
 
-  qspi_dma_sample(priv, DMA_AFTER_SETUP);
-
-  /* Enable the memory transfer */
-
-  regval = qspi_getreg(priv, STM32_QUADSPI_CR_OFFSET);
-  regval |= QSPI_CR_DMAEN;
-  qspi_putreg(priv, regval, STM32_QUADSPI_CR_OFFSET);
-
-  /* Set up the Communications Configuration Register as per command info */
-
-  qspi_ccrconfig(priv, xctn,
-                 QSPIMEM_ISWRITE(meminfo->flags) ? CCR_FMODE_INDWR :
-                                                   CCR_FMODE_INDRD);
-
-  /* Start the DMA */
-
+  nxsem_reset(&priv->dmawait, 0);
+  stm32_dmasetup(priv->dmach, &config);
   priv->result = -EBUSY;
+  qspi_ccrconfig(priv, xctn, CCR_FMODE_INDWR);
+  if (QSPIMEM_ISREAD(meminfo->flags))
+    {
+      regval = qspi_getreg(priv, STM32_QUADSPI_CCR_OFFSET);
+      regval &= ~QSPI_CCR_FMODE_MASK;
+      regval |= QSPI_CCR_FMODE(CCR_FMODE_INDRD);
+      qspi_putreg(priv, regval, STM32_QUADSPI_CCR_OFFSET);
+      qspi_putreg(priv, xctn->addr, STM32_QUADSPI_AR_OFFSET);
+    }
+
   stm32_dmastart(priv->dmach, qspi_dma_callback, priv, false);
-
   qspi_dma_sample(priv, DMA_AFTER_START);
-
-  /* Wait for DMA completion.  This is done in a loop because there may be
-   * false alarm semaphore counts that cause nxsem_wait() not fail to wait
-   * or to wake-up prematurely (for example due to the receipt of a signal).
-   * We know that the DMA has completed when the result is anything other
-   * that -EBUSY.
-   */
-
-  do
-    {
-      /* Start (or re-start) the watchdog timeout */
-
-      ret = wd_start(&priv->dmadog, DMA_TIMEOUT_TICKS,
-                     qspi_dma_timeout, (wdparm_t)priv);
-      if (ret < 0)
-        {
-           spierr("ERROR: wd_start failed: %d\n", ret);
-        }
-
-      /* Wait for the DMA complete */
-
-      ret = nxsem_wait(&priv->dmawait);
-
-      if (QSPIMEM_ISREAD(meminfo->flags))
-        {
-          up_invalidate_dcache((uintptr_t)meminfo->buffer,
-                               (uintptr_t)meminfo->buffer + meminfo->buflen);
-        }
-
-      /* Cancel the watchdog timeout */
-
-      wd_cancel(&priv->dmadog);
-
-      /* Check if we were awakened by an error of some kind */
-
-      if (ret < 0)
-        {
-          /* EINTR is not a failure.  That simply means that the wait
-           * was awakened by a signal.
-           */
-
-          if (ret != -EINTR)
-            {
-              DEBUGPANIC();
-              regval = qspi_getreg(priv, STM32_QUADSPI_CR_OFFSET);
-              regval &= ~QSPI_CR_DMAEN;
-              qspi_putreg(priv, regval, STM32_QUADSPI_CR_OFFSET);
-              return ret;
-            }
-        }
-
-      /* Note that we might be awakened before the wait is over due to
-       * residual counts on the semaphore.  So, to handle, that case,
-       * we loop until something changes the DMA result to any value other
-       * than -EBUSY.
-       */
-    }
-  while (priv->result == -EBUSY);
-
-  /* Wait for Transfer complete, and not busy */
-
-  qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
-  qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
-  UP_MB();
-
-  /* Dump the sampled DMA registers */
-
-  qspi_dma_sampledone(priv);
-
-  /* Make sure that the DMA is stopped (it will be stopped automatically
-   * on normal transfers, but not necessarily when the transfer terminates
-   * on an error condition).
-   */
-
+  ret = nxsem_tickwait_uninterruptible(&priv->dmawait, DMA_TIMEOUT_TICKS);
   stm32_dmastop(priv->dmach);
-
-  regval = qspi_getreg(priv, STM32_QUADSPI_CR_OFFSET);
-  regval &= ~QSPI_CR_DMAEN;
-  qspi_putreg(priv, regval, STM32_QUADSPI_CR_OFFSET);
-
-  /* Complain if the DMA fails */
-
-  if (priv->result)
+  if (ret == OK)
     {
-      spierr("ERROR: DMA failed with result: %d\n", priv->result);
+      ret = priv->result;
     }
 
-  return priv->result;
+  /* MDMA completion can precede the final serial clock on a write. Bound
+   * the peripheral wait as well; an MDMA error must not enter a TCF loop.
+   */
+
+  start = clock_systime_ticks();
+  while (ret == OK)
+    {
+      status = qspi_getreg(priv, STM32_QUADSPI_SR_OFFSET);
+      if ((status & QSPI_SR_TEF) != 0)
+        {
+          ret = -EIO;
+        }
+      else if ((status & (QSPI_SR_TCF | QSPI_SR_BUSY)) == QSPI_SR_TCF)
+        {
+          break;
+        }
+      else if (clock_systime_ticks() - start >= DMA_TIMEOUT_TICKS)
+        {
+          ret = -ETIMEDOUT;
+        }
+    }
+
+  if (ret < 0)
+    {
+      qspi_abort(priv);
+      spierr("ERROR: MDMA transfer failed: %d\n", ret);
+    }
+
+  if (QSPIMEM_ISREAD(meminfo->flags))
+    {
+      up_invalidate_dcache(buffer, buffer + meminfo->buflen);
+    }
+
+  UP_MB();
+  qspi_dma_sample(priv, DMA_END_TRANSFER);
+  return ret;
 }
 #endif
 
@@ -1717,25 +1505,16 @@ static int qspi_receive_blocking(struct stm32h7_qspidev_s *priv,
         {
           /* Wait for Fifo Threshold, or Transfer Complete, to read data */
 
-          qspi_waitstatusflags(priv, QSPI_SR_FTF | QSPI_SR_TCF, 1);
+          ret = qspi_waitstatusflags(priv, QSPI_SR_FTF | QSPI_SR_TCF, 1);
+          if (ret < 0)
+            {
+              qspi_abort(priv);
+              return ret;
+            }
 
           *dest = *(volatile uint8_t *)datareg;
           dest++;
           remaining--;
-        }
-
-      if (ret == OK)
-        {
-          /* Wait for transfer complete, then clear it */
-
-          qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
-          qspi_putreg(priv, QSPI_FCR_CTCF, STM32_QUADSPI_FCR_OFFSET);
-
-          /* Use Abort to clear the busy flag, and ditch any extra bytes in
-           * fifo
-           */
-
-          qspi_abort(priv);
         }
     }
   else
@@ -1781,22 +1560,15 @@ static int qspi_transmit_blocking(struct stm32h7_qspidev_s *priv,
         {
           /* Wait for Fifo Threshold to write data */
 
-          qspi_waitstatusflags(priv, QSPI_SR_FTF, 1);
+          ret = qspi_waitstatusflags(priv, QSPI_SR_FTF, 1);
+          if (ret < 0)
+            {
+              qspi_abort(priv);
+              return ret;
+            }
 
           *(volatile uint8_t *)datareg = *src++;
           remaining--;
-        }
-
-      if (ret == OK)
-        {
-          /* Wait for transfer complete, then clear it */
-
-          qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
-          qspi_putreg(priv, QSPI_FCR_CTCF, STM32_QUADSPI_FCR_OFFSET);
-
-          /* Use Abort to clear the Busy flag */
-
-          qspi_abort(priv);
         }
     }
   else
@@ -2067,7 +1839,11 @@ static int qspi_command(struct qspi_dev_s *dev,
                         struct qspi_cmdinfo_s *cmdinfo)
 {
   struct stm32h7_qspidev_s *priv = (struct stm32h7_qspidev_s *)dev;
-  struct qspi_xctnspec_s xctn;
+  struct qspi_xctnspec_s xctn =
+    {
+      0
+    };
+
   int ret;
 
   /* Reject commands issued while in memory mapped mode, which will
@@ -2093,7 +1869,11 @@ static int qspi_command(struct qspi_dev_s *dev,
   /* Wait 'till non-busy */
 
   qspi_abort(priv);
-  qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+  ret = qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Clear flags */
 
@@ -2218,8 +1998,15 @@ static int qspi_command(struct qspi_dev_s *dev,
 
   /* Wait for Transfer complete, and not busy */
 
-  qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
-  qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+  if (ret == OK)
+    {
+      ret = qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
+    }
+
+  if (ret == OK)
+    {
+      ret = qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+    }
 
 #endif
 
@@ -2245,7 +2032,11 @@ static int qspi_memory(struct qspi_dev_s *dev,
                        struct qspi_meminfo_s *meminfo)
 {
   struct stm32h7_qspidev_s *priv = (struct stm32h7_qspidev_s *)dev;
-  struct qspi_xctnspec_s xctn;
+  struct qspi_xctnspec_s xctn =
+    {
+      0
+    };
+
   int ret;
 
   /* Reject commands issued while in memory mapped mode, which will
@@ -2266,12 +2057,59 @@ static int qspi_memory(struct qspi_dev_s *dev,
       return ret;
     }
 
+#ifdef CONFIG_STM32_QSPI_DMA
+  /* File-system buffers need not own complete cache lines. Receive into
+   * an aligned, private buffer rather than invalidating adjacent objects.
+   * Split large reads so MDMA's 17-bit byte count cannot overflow.
+   */
+
+  if (priv->candma && QSPIMEM_ISREAD(meminfo->flags) &&
+      meminfo->buflen >= 32 &&
+      (!IS_ALIGNED((uintptr_t)meminfo->buffer, 32) ||
+       !IS_ALIGNED(meminfo->buflen, 32) ||
+       meminfo->buflen > MDMA_CBNDTR_BNDT_MASK))
+    {
+      struct qspi_meminfo_s chunk = *meminfo;
+      uint8_t *destination = meminfo->buffer;
+      size_t remaining = meminfo->buflen;
+      size_t count;
+
+      chunk.buffer = priv->dmabuffer;
+      while (remaining > 0)
+        {
+          count = MIN(remaining, sizeof(priv->dmabuffer));
+          if (count >= 32)
+            {
+              count &= ~(size_t)31;
+            }
+
+          chunk.buflen = count;
+          ret = qspi_memory(dev, &chunk);
+          if (ret < 0)
+            {
+              return ret;
+            }
+
+          memcpy(destination, chunk.buffer, count);
+          destination += count;
+          chunk.addr += count;
+          remaining -= count;
+        }
+
+      return OK;
+    }
+#endif
+
   /* Prepare for transaction */
 
   /* Wait 'till non-busy */
 
   qspi_abort(priv);
-  qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+  ret = qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Clear flags */
 
@@ -2338,8 +2176,11 @@ static int qspi_memory(struct qspi_dev_s *dev,
 
   if (priv->candma &&
       meminfo->buflen > CONFIG_STM32_QSPI_DMATHRESHOLD &&
-      IS_ALIGNED((uintptr_t)meminfo->buffer, 4) &&
-      IS_ALIGNED(meminfo->buflen, 4))
+      meminfo->buflen <= MDMA_CBNDTR_BNDT_MASK &&
+      meminfo->buflen % CONFIG_STM32_QSPI_FIFO_THESHOLD == 0 &&
+      (QSPIMEM_ISWRITE(meminfo->flags) ||
+       IS_ALIGNED((uintptr_t)meminfo->buffer, 32)) &&
+      IS_ALIGNED(meminfo->buflen, 32))
     {
       ret = qspi_memory_dma(priv, meminfo, &xctn);
     }
@@ -2351,9 +2192,7 @@ static int qspi_memory(struct qspi_dev_s *dev,
        * info
        */
 
-      qspi_ccrconfig(priv, &xctn,
-                     QSPIMEM_ISWRITE(meminfo->flags) ? CCR_FMODE_INDWR :
-                                                       CCR_FMODE_INDRD);
+      qspi_ccrconfig(priv, &xctn, CCR_FMODE_INDWR);
 
       /* Transfer data */
 
@@ -2371,8 +2210,15 @@ static int qspi_memory(struct qspi_dev_s *dev,
 
       /* Wait for Transfer complete, and not busy */
 
-      qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
-      qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+      if (ret == OK)
+        {
+          ret = qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
+        }
+
+      if (ret == OK)
+        {
+          ret = qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+        }
 
       UP_MB();
     }
@@ -2382,9 +2228,7 @@ static int qspi_memory(struct qspi_dev_s *dev,
 
   /* Set up the Communications Configuration Register as per command info */
 
-  qspi_ccrconfig(priv, &xctn,
-                 QSPIMEM_ISWRITE(meminfo->flags) ? CCR_FMODE_INDWR :
-                                                   CCR_FMODE_INDRD);
+  qspi_ccrconfig(priv, &xctn, CCR_FMODE_INDWR);
 
   /* Transfer data */
 
@@ -2402,8 +2246,15 @@ static int qspi_memory(struct qspi_dev_s *dev,
 
   /* Wait for Transfer complete, and not busy */
 
-  qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
-  qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+  if (ret == OK)
+    {
+      ret = qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
+    }
+
+  if (ret == OK)
+    {
+      ret = qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
+    }
 
   UP_MB();
 
@@ -2430,14 +2281,9 @@ static int qspi_memory(struct qspi_dev_s *dev,
 
 static void *qspi_alloc(struct qspi_dev_s *dev, size_t buflen)
 {
-  /* Here we exploit the carnal knowledge the kmm_malloc() will return memory
-   * aligned to 64-bit addresses.  The buffer length must be large enough to
-   * hold the rested buflen in units a 32-bits.
-   */
+  /* Receive buffers must own complete cache lines before invalidation. */
 
-  /* Ensure that the DMA buffers are word-aligned. */
-
-  return kmm_malloc(ALIGN_UP(buflen, 4));
+  return kmm_memalign(32, ALIGN_UP(buflen, 32));
 }
 
 /****************************************************************************
@@ -2732,7 +2578,10 @@ void stm32_qspi_enter_memorymapped(struct qspi_dev_s *dev,
 {
   struct stm32h7_qspidev_s *priv = (struct stm32h7_qspidev_s *)dev;
   uint32_t regval;
-  struct qspi_xctnspec_s xctn;
+  struct qspi_xctnspec_s xctn =
+    {
+      0
+    };
 
   /* lock during this mode change */
 

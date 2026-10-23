@@ -46,6 +46,7 @@ config STM32_QSPI_INTERRUPTS
 config STM32_QSPI_DMA
 	bool "DMA"
 	depends on STM32_DMA
+	depends on !ARCH_CHIP_STM32H7 || STM32_MDMA
 	---help---
 		Use DMA to improve QSPI transfer performance.
 
@@ -143,7 +144,7 @@ config STM32_QSPI_DMATHRESHOLD
 
 config STM32_QSPI_DMADEBUG
 	bool "QSPI DMA transfer debug"
-	depends on STM32_QSPI_DMA && DEBUG_SPI && DEBUG_DMA
+	depends on STM32_QSPI_DMA && DEBUG_SPI_INFO && DEBUG_DMA_INFO
 	---help---
 		Enable special debug instrumentation to analyze QSPI DMA data transfers.
 		This logic is as non-invasive as possible:  It samples DMA
