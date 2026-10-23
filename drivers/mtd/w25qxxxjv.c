@@ -1094,8 +1094,13 @@ static int w25qxxxjv_write_page(FAR struct w25qxxxjv_dev_s *priv,
 
   /* Set up non-varying parts of transfer description */
 
+#ifdef CONFIG_W25QXXXJV_QUAD_PROGRAM
+  meminfo.flags   = QSPIMEM_WRITE | QSPIMEM_QUADDATA;
+  meminfo.cmd     = priv->addresslen == 4 ? 0x34 : 0x32;
+#else
   meminfo.flags   = QSPIMEM_WRITE;
   meminfo.cmd     = W25QXXXJV_PAGE_PROGRAM;
+#endif
   meminfo.addrlen = priv->addresslen;
   meminfo.buflen  = pagesize;
   meminfo.dummies = 0;

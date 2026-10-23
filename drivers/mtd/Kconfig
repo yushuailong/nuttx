@@ -887,6 +887,14 @@ config W25QXXXJV_QSPI_FREQUENCY
 		– 266/532MHz equivalent Dual/Quad SPI
 		– 66MB/S continuous data transfer rate
 
+config W25QXXXJV_QUAD_PROGRAM
+	bool "Quad Input Page Program"
+	default n
+	---help---
+		Send page data on four lines using command 0x32 (or 0x34 for
+		four-byte addressing). The QSPI controller must support the
+		QUADDATA flag: single-line instruction/address, quad-line data.
+
 config W25QXXXJV_SECTOR512
 	bool "Simulate 512 byte Erase Blocks"
 	default n
