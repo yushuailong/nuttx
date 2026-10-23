@@ -61,6 +61,7 @@
 #include <nuttx/debug.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/clock.h>
 #include <nuttx/compiler.h>
 #include <nuttx/mutex.h>
 #include <nuttx/spi/spi.h>
@@ -238,6 +239,7 @@ struct stm32_spidev_s
   uint32_t         spibase;      /* SPIn base address */
   uint32_t         spiclock;     /* Clocking for the SPI module */
   uint8_t          spiirq;       /* SPI IRQ number */
+  int              error;        /* First uncollected transfer error */
 #ifdef CONFIG_STM32_SPI_DMA
   volatile uint8_t rxresult;     /* Result of the RX DMA */
   volatile uint8_t txresult;     /* Result of the RX DMA */
@@ -254,6 +256,7 @@ struct stm32_spidev_s
   DMA_HANDLE       txdma;        /* DMA channel handle for TX transfers */
   sem_t            rxsem;        /* Wait for RX DMA to complete */
   sem_t            txsem;        /* Wait for TX DMA to complete */
+  clock_t          dmatimeout;   /* Wire time plus completion margin */
   uint32_t         txccr;        /* DMA control register for TX transfers */
   uint32_t         rxccr;        /* DMA control register for RX transfers */
 #endif
@@ -1142,15 +1145,15 @@ static int spi_dmarxwait(struct stm32_spidev_s *priv)
 
   do
     {
-      ret = nxsem_wait_uninterruptible(&priv->rxsem);
-
-      /* The only expected error is ECANCELED which would occur if the
-       * calling thread were canceled.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -ECANCELED);
+      ret = nxsem_tickwait_uninterruptible(&priv->rxsem,
+                                          priv->dmatimeout);
     }
   while (priv->rxresult == 0 && ret == OK);
+
+  if (ret == OK && (priv->rxresult & DMA_STATUS_ERROR) != 0)
+    {
+      ret = -EIO;
+    }
 
   return ret;
 }
@@ -1187,15 +1190,15 @@ static int spi_dmatxwait(struct stm32_spidev_s *priv)
 
   do
     {
-      ret = nxsem_wait_uninterruptible(&priv->txsem);
-
-      /* The only expected error is ECANCELED which would occur if the
-       * calling thread were canceled.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -ECANCELED);
+      ret = nxsem_tickwait_uninterruptible(&priv->txsem,
+                                          priv->dmatimeout);
     }
   while (priv->txresult == 0 && ret == OK);
+
+  if (ret == OK && (priv->txresult & DMA_STATUS_ERROR) != 0)
+    {
+      ret = -EIO;
+    }
 
   return ret;
 }
@@ -1495,6 +1498,104 @@ static inline int spi_enable(struct stm32_spidev_s *priv, bool state)
 
   return ret;
 }
+
+/****************************************************************************
+ * Name: spi_dma_abort
+ *
+ * Description:
+ *   Stop DMA before returning buffer ownership. Reset the SPI peripheral
+ *   to discard partially transmitted FIFO data, then restore its settings.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_STM32_SPI_DMA
+static void spi_dma_abort(struct stm32_spidev_s *priv)
+{
+  uint32_t cr1 = spi_getreg(priv, STM32_SPI_CR1_OFFSET);
+  uint32_t cr2 = spi_getreg(priv, STM32_SPI_CR2_OFFSET);
+  uint32_t cfg1 = spi_getreg(priv, STM32_SPI_CFG1_OFFSET);
+  uint32_t cfg2 = spi_getreg(priv, STM32_SPI_CFG2_OFFSET);
+  uint32_t crc = spi_getreg(priv, STM32_SPI_CRCPOLY_OFFSET);
+  uintptr_t resetreg = 0;
+  uint32_t resetbit = 0;
+  irqstate_t flags;
+
+  flags = enter_critical_section();
+  spi_modifyreg(priv, STM32_SPI_IER_OFFSET, SPI_IER_EOTIE, 0);
+  if (priv->rxdma != NULL)
+    {
+      stm32_dmastop(priv->rxdma);
+    }
+
+  if (priv->txdma != NULL)
+    {
+      stm32_dmastop(priv->txdma);
+    }
+
+  spi_enable(priv, false);
+  switch (priv->spibase)
+    {
+#ifdef CONFIG_STM32_SPI1
+      case STM32_SPI1_BASE:
+        resetreg = STM32_RCC_APB2RSTR;
+        resetbit = RCC_APB2RSTR_SPI1RST;
+        break;
+#endif
+#ifdef CONFIG_STM32_SPI2
+      case STM32_SPI2_BASE:
+        resetreg = STM32_RCC_APB1LRSTR;
+        resetbit = RCC_APB1LRSTR_SPI2RST;
+        break;
+#endif
+#ifdef CONFIG_STM32_SPI3
+      case STM32_SPI3_BASE:
+        resetreg = STM32_RCC_APB1LRSTR;
+        resetbit = RCC_APB1LRSTR_SPI3RST;
+        break;
+#endif
+#ifdef CONFIG_STM32_SPI4
+      case STM32_SPI4_BASE:
+        resetreg = STM32_RCC_APB2RSTR;
+        resetbit = RCC_APB2RSTR_SPI4RST;
+        break;
+#endif
+#ifdef CONFIG_STM32_SPI5
+      case STM32_SPI5_BASE:
+        resetreg = STM32_RCC_APB2RSTR;
+        resetbit = RCC_APB2RSTR_SPI5RST;
+        break;
+#endif
+#ifdef CONFIG_STM32_SPI6
+      case STM32_SPI6_BASE:
+        resetreg = STM32_RCC_APB4RSTR;
+        resetbit = RCC_APB4RSTR_SPI6RST;
+        break;
+#endif
+      default:
+        DEBUGPANIC();
+        break;
+    }
+
+  if (resetreg != 0)
+    {
+      modifyreg32(resetreg, 0, resetbit);
+      getreg32(resetreg);
+      modifyreg32(resetreg, resetbit, 0);
+    }
+
+  cfg1 &= ~(SPI_CFG1_TXDMAEN | SPI_CFG1_RXDMAEN);
+  cr1 &= ~(SPI_CR1_SPE | SPI_CR1_CSTART | SPI_CR1_CSUSP);
+  spi_putreg(priv, STM32_SPI_CFG1_OFFSET, cfg1);
+  spi_putreg(priv, STM32_SPI_CFG2_OFFSET, cfg2);
+  spi_putreg(priv, STM32_SPI_CR2_OFFSET, cr2);
+  spi_putreg(priv, STM32_SPI_CRCPOLY_OFFSET, crc);
+  spi_putreg(priv, STM32_SPI_CR1_OFFSET, cr1);
+  nxsem_reset(&priv->rxsem, 0);
+  nxsem_reset(&priv->txsem, 0);
+  spi_enable(priv, true);
+  leave_critical_section(flags);
+}
+#endif
 
 /****************************************************************************
  * Name: spi_setfrequency
@@ -2080,6 +2181,8 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
     aligned_data(ARMV7M_DCACHE_LINESIZE);
   static const uint16_t txdummy = 0xffff;
   void *orig_rxbuffer = rxbuffer;
+  irqstate_t flags;
+  int ret;
 
   DEBUGASSERT(priv != NULL);
 
@@ -2205,6 +2308,16 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
               txbuffer, rxbuffer, nwords);
       DEBUGASSERT(priv->spibase != 0);
 
+      /* Include wire time so low SPI clocks still have a valid deadline. */
+
+      priv->dmatimeout = MSEC2TICK(CONFIG_STM32_SPI_DMA_TIMEOUT);
+      if (priv->actual > 0)
+        {
+          priv->dmatimeout += MSEC2TICK(
+            ((uint64_t)nwords * priv->nbits * 1000 + priv->actual - 1) /
+            priv->actual);
+        }
+
       /* Setup the DMA */
 
       if (priv->config != SIMPLEX_TX)
@@ -2217,6 +2330,11 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
           stm32_dmasetup(priv->txdma, &txdmacfg);
         }
 
+      /* A short DMA can complete before SPE is set. Defer its callback
+       * until SPI is enabled, so EOTIE cannot signal an idle TXC early.
+       */
+
+      flags = enter_critical_section();
 #ifdef CONFIG_SPI_TRIGGER
       /* Is deferred triggering in effect? */
 
@@ -2243,11 +2361,34 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
       spi_enable(priv, true);
       spi_modifyreg(priv, STM32_SPI_CR1_OFFSET, 0, SPI_CR1_CSTART);
 #endif
+      leave_critical_section(flags);
 
-      /* Then wait for each to complete */
+      ret = spi_dmarxwait(priv);
+      if (ret == OK)
+        {
+          ret = spi_dmatxwait(priv);
+        }
 
-      spi_dmarxwait(priv);
-      spi_dmatxwait(priv);
+      if (ret < 0)
+        {
+          spi_dma_abort(priv);
+          if (rxbuffer != NULL)
+            {
+              up_invalidate_dcache((uintptr_t)rxbuffer,
+                                   (uintptr_t)rxbuffer + nbytes);
+            }
+
+          if (priv->error == OK)
+            {
+              priv->error = ret;
+            }
+
+          spierr("ERROR: SPI DMA transfer failed: %d\n", ret);
+#ifdef CONFIG_SPI_TRIGGER
+          priv->trigarmed = false;
+#endif
+          return;
+        }
 
       /* To close communication it is mandatory to follow these steps in
        * this order:
@@ -2311,16 +2452,19 @@ static int spi_trigger(struct spi_dev_s *dev)
 {
 #ifdef CONFIG_STM32_SPI_DMA
   struct stm32_spidev_s *priv = (struct stm32_spidev_s *)dev;
+  irqstate_t flags;
 
   if (!priv->trigarmed)
     {
       return -EIO;
     }
 
+  flags = enter_critical_section();
   spi_dmarxstart(priv);
   spi_dmatxstart(priv);
   spi_enable(priv, true);
   spi_modifyreg(priv, STM32_SPI_CR1_OFFSET, 0, SPI_CR1_CSTART);
+  leave_critical_section(flags);
   return OK;
 #else
   return -ENOSYS;
@@ -2781,6 +2925,28 @@ struct spi_dev_s *stm32_spibus_initialize(int bus)
 
   leave_critical_section(flags);
   return (struct spi_dev_s *)priv;
+}
+
+/****************************************************************************
+ * Name: stm32_spi_geterror
+ *
+ * Description:
+ *   Return and clear the first DMA transfer error since the previous call.
+ *   Device clients must serialize their transfer/error collection sequence.
+ *
+ ****************************************************************************/
+
+int stm32_spi_geterror(struct spi_dev_s *dev)
+{
+  struct stm32_spidev_s *priv = (struct stm32_spidev_s *)dev;
+  irqstate_t flags;
+  int ret;
+
+  flags = enter_critical_section();
+  ret = priv->error;
+  priv->error = OK;
+  leave_critical_section(flags);
+  return ret;
 }
 
 #endif /* CONFIG_STM32_SPI1 || CONFIG_STM32_SPI2 || CONFIG_STM32_SPI3 ||

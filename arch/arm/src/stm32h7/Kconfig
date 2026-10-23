@@ -7,6 +7,16 @@ if ARCH_CHIP_STM32H7
 
 comment "STM32 H7 Configuration Options"
 
+config STM32_SPI_DMA_TIMEOUT
+	int "SPI DMA completion timeout (milliseconds)"
+	default 1000
+	range 1 60000
+	depends on STM32_SPI_DMA
+	---help---
+		Additional time allowed for DMA and final SPI completion beyond
+		the expected wire time. A failed transfer stops both DMA channels
+		before returning its buffers to the caller.
+
 config STM32_MPU_BOARD_INIT
 	bool "Board-specific MPU regions"
 	depends on ARM_MPU

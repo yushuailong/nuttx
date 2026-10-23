@@ -68,6 +68,18 @@ struct spi_dev_s; /* Forward reference */
 struct spi_dev_s *stm32_spibus_initialize(int bus);
 
 /****************************************************************************
+ * Name: stm32_spi_geterror
+ *
+ * Description:
+ *   Return and clear the first DMA transfer error since the previous call.
+ *   The generic SPI exchange interface has no error return. Device clients
+ *   using this extension must serialize transfers and error collection.
+ *
+ ****************************************************************************/
+
+int stm32_spi_geterror(struct spi_dev_s *dev);
+
+/****************************************************************************
  * Name: stm32_spi_slave_initialize
  *
  * Description:
