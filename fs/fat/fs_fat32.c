@@ -61,6 +61,19 @@
 #define DIV_ROUND_UP(a, b)      (ROUND_UP(a, b) / (b))
 
 /****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+#ifndef CONFIG_FAT_FORCE_INDIRECT
+struct fat_direct_s
+{
+  uint32_t cluster;              /* Cluster containing the last sector */
+  unsigned int nsectors;         /* Physically contiguous sectors */
+  unsigned int remaining;        /* Sectors left in the last cluster */
+};
+#endif
+
+/****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
@@ -1132,6 +1145,100 @@ out:
 }
 
 /****************************************************************************
+ * Name: fat_directsectors
+ *
+ * Description:
+ *   Find a bounded run of physically contiguous sectors. For writes, extend
+ *   the chain as needed without making unwritten bytes part of the file.
+ *   Keep the file cursor unchanged until the data transfer succeeds.
+ *
+ ****************************************************************************/
+
+#ifndef CONFIG_FAT_FORCE_INDIRECT
+static int fat_directsectors(FAR struct file *filep,
+                             unsigned int maxsectors, bool writing,
+                             FAR struct fat_direct_s *run)
+{
+  FAR struct fat_mountpt_s *fs = filep->f_inode->i_private;
+  FAR struct fat_file_s *ff = filep->f_priv;
+  unsigned int count;
+  off_t next;
+
+  if (maxsectors > CONFIG_FAT_MAXIO)
+    {
+      maxsectors = CONFIG_FAT_MAXIO;
+    }
+
+  run->cluster = ff->ff_currentcluster;
+  run->nsectors = ff->ff_sectorsincluster;
+  if (run->nsectors > maxsectors)
+    {
+      run->nsectors = maxsectors;
+    }
+
+  run->remaining = ff->ff_sectorsincluster - run->nsectors;
+
+  while (run->nsectors < maxsectors)
+    {
+      next = fat_getcluster(fs, run->cluster);
+      if (next < 0)
+        {
+          return (int)next;
+        }
+
+      if (writing && next >= fs->fs_nclusters + 2)
+        {
+          next = fat_extendchain(fs, run->cluster);
+          if (next < 0)
+            {
+              return (int)next;
+            }
+        }
+
+      /* Stop at a fragment, end of chain, or lack of free clusters. The
+       * normal cursor lookup handles the next cluster on the next pass.
+       */
+
+      if (next != run->cluster + 1 || next >= fs->fs_nclusters + 2)
+        {
+          break;
+        }
+
+      count = maxsectors - run->nsectors;
+      if (count > fs->fs_fatsecperclus)
+        {
+          count = fs->fs_fatsecperclus;
+        }
+
+      run->cluster = next;
+      run->nsectors += count;
+      run->remaining = fs->fs_fatsecperclus - count;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: fat_directadvance
+ ****************************************************************************/
+
+static void fat_directadvance(FAR struct file *filep,
+                              FAR const struct fat_direct_s *run)
+{
+  FAR struct fat_mountpt_s *fs = filep->f_inode->i_private;
+  FAR struct fat_file_s *ff = filep->f_priv;
+  off_t endpos;
+
+  endpos = filep->f_pos + run->nsectors * fs->fs_hwsectorsize;
+  ff->ff_currentcluster = run->cluster;
+  ff->ff_sectorsincluster = run->remaining;
+  ff->ff_currentsector += run->nsectors;
+  ff->ff_pos = ROUND_DOWN(endpos - 1,
+                          fs->fs_fatsecperclus * fs->fs_hwsectorsize);
+}
+#endif
+
+/****************************************************************************
  * Name: fat_read
  ****************************************************************************/
 
@@ -1149,6 +1256,7 @@ static ssize_t fat_read(FAR struct file *filep, FAR char *buffer,
   int ret;
 
 #ifndef CONFIG_FAT_FORCE_INDIRECT
+  struct fat_direct_s run;
   unsigned int nsectors;
   bool force_indirect = false;
 #endif
@@ -1251,24 +1359,23 @@ fat_read_restart:
       nsectors = buflen / fs->fs_hwsectorsize;
       if (nsectors > 0 && sectorindex == 0 && !force_indirect)
         {
-          /* Read maximum contiguous sectors directly to the user's
-           * buffer without using our tiny read buffer.
-           *
-           * Limit the number of sectors that we read on this time
-           * through the loop to the remaining contiguous sectors
-           * in this cluster
-           */
-
-          if (nsectors > ff->ff_sectorsincluster)
-            {
-              nsectors = ff->ff_sectorsincluster;
-            }
-
           /* We are not sure of the state of the file buffer so
            * the safest thing to do is just invalidate it
            */
 
-          fat_ffcacheinvalidate(fs, ff);
+          ret = fat_ffcacheinvalidate(fs, ff);
+          if (ret < 0)
+            {
+              goto errout_with_lock;
+            }
+
+          ret = fat_directsectors(filep, nsectors, false, &run);
+          if (ret < 0)
+            {
+              goto errout_with_lock;
+            }
+
+          nsectors = run.nsectors;
 
           /* Read all of the sectors directly into user memory */
 
@@ -1296,8 +1403,7 @@ fat_read_restart:
               goto errout_with_lock;
             }
 
-          ff->ff_sectorsincluster -= nsectors;
-          ff->ff_currentsector    += nsectors;
+          fat_directadvance(filep, &run);
           bytesread                = nsectors * fs->fs_hwsectorsize;
         }
       else
@@ -1369,6 +1475,7 @@ static ssize_t fat_write(FAR struct file *filep, FAR const char *buffer,
   int ret;
 
 #ifndef CONFIG_FAT_FORCE_INDIRECT
+  struct fat_direct_s run;
   unsigned int nsectors;
   bool force_indirect = false;
 #endif
@@ -1449,25 +1556,29 @@ fat_write_restart:
       nsectors = buflen / fs->fs_hwsectorsize;
       if (nsectors > 0 && sectorindex == 0 && !force_indirect)
         {
-          /* Write maximum contiguous sectors directly from the user's
-           * buffer without using our tiny read buffer.
-           *
-           * Limit the number of sectors that we write on this time
-           * through the loop to the remaining contiguous sectors
-           * in this cluster
-           */
-
-          if (nsectors > ff->ff_sectorsincluster)
-            {
-              nsectors = ff->ff_sectorsincluster;
-            }
-
           /* We are not sure of the state of the sector cache so the
            * safest thing to do is write back any dirty, cached sector
            * and invalidate the current cache content.
            */
 
-          fat_ffcacheinvalidate(fs, ff);
+          ret = fat_ffcacheinvalidate(fs, ff);
+          if (ret < 0)
+            {
+              goto errout_with_lock;
+            }
+
+          /* A chain extended before a failed data transfer must still
+           * remain reachable through the file's directory entry.
+           */
+
+          ff->ff_bflags |= FFBUFF_MODIFIED;
+          ret = fat_directsectors(filep, nsectors, true, &run);
+          if (ret < 0)
+            {
+              goto errout_with_lock;
+            }
+
+          nsectors = run.nsectors;
 
           /* Write all of the sectors directly from user memory */
 
@@ -1495,8 +1606,7 @@ fat_write_restart:
               goto errout_with_lock;
             }
 
-          ff->ff_sectorsincluster -= nsectors;
-          ff->ff_currentsector    += nsectors;
+          fat_directadvance(filep, &run);
           writesize                = nsectors * fs->fs_hwsectorsize;
           ff->ff_bflags           |= FFBUFF_MODIFIED;
         }

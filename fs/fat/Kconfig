@@ -96,6 +96,18 @@ config FS_FATTIME
 		much sense in supporting FAT date and time unless you have a
 		hardware RTC or other way to get the time and date.
 
+config FAT_MAXIO
+	int "Maximum sectors per direct transfer"
+	default 128
+	range 1 65535
+	depends on !FAT_FORCE_INDIRECT
+	---help---
+		Combine physically contiguous clusters into direct read and write
+		requests of up to this many sectors. The block driver may split
+		these requests further to satisfy its hardware limits. No extra
+		data buffer is allocated. Fragmented chains and partial sectors
+		continue to use smaller transfers.
+
 config FAT_FORCE_INDIRECT
 	bool "Force direct transfers"
 	default n
