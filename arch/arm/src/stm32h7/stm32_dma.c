@@ -1298,9 +1298,9 @@ static void stm32_sdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
           timeout--;
         }
 
-        DEBUGASSERT(timeout != 0 &&
-                    (dmachan_getreg(dmachan, STM32_DMA_SCR_OFFSET) &
-                     DMA_SCR_EN) == 0);
+      DEBUGASSERT(timeout != 0 &&
+                  (dmachan_getreg(dmachan, STM32_DMA_SCR_OFFSET) &
+                   DMA_SCR_EN) == 0);
     }
 
   /* "... All the stream dedicated bits set in the status register (DMA_LISR
@@ -1605,7 +1605,7 @@ static bool stm32_sdma_capable(stm32_dmacfg_t *cfg)
                   "maddr:0x%08" PRIx32 " mend:0x%08" PRIx32 "\n",
                   cfg->maddr, mend);
 #if !defined(CONFIG_STM32_DMACAPABLE_ASSUME_CACHE_ALIGNED)
-      return false;
+          return false;
 #endif
         }
     }
@@ -1857,6 +1857,7 @@ static int stm32_bdma_interrupt(int irq, void *context, void *arg)
 static inline int32_t stm32_sdma_scr_2_bdma_ccr(int32_t scr)
 {
   uint32_t ccr = 0;
+
   ccr |= (scr & DMA_SCR_CT) ? BDMA_CCR_CT : 0;
   ccr |= (scr & DMA_SCR_DBM) ? BDMA_CCR_DBM : 0;
   ccr |= (scr & DMA_SCR_PL_MASK) >> (DMA_SCR_PL_SHIFT - BDMA_CCR_PRILO);
@@ -1938,9 +1939,9 @@ static void stm32_bdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
           timeout--;
         }
 
-        DEBUGASSERT(timeout != 0 &&
-                    (dmachan_getreg(dmachan, STM32_BDMACH_CCR_OFFSET) &
-                        BDMA_CCR_EN) == 0);
+      DEBUGASSERT(timeout != 0 &&
+                  (dmachan_getreg(dmachan, STM32_BDMACH_CCR_OFFSET) &
+                   BDMA_CCR_EN) == 0);
     }
 
   /* "... All the stream dedicated bits set in the status register BDMA_ISR
