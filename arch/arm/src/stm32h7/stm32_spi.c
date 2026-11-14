@@ -234,7 +234,7 @@ struct stm32_spidev_s
   uint8_t          spiirq;       /* SPI IRQ number */
 #ifdef CONFIG_STM32_SPI_DMA
   volatile uint8_t rxresult;     /* Result of the RX DMA */
-  volatile uint8_t txresult;     /* Result of the RX DMA */
+  volatile uint8_t txresult;     /* TX completion or DMA error */
 #ifdef CONFIG_SPI_TRIGGER
   bool             defertrig;    /* Flag indicating that trigger should be deferred */
   bool             trigarmed;    /* Flag indicating that the trigger is armed */
@@ -247,7 +247,7 @@ struct stm32_spidev_s
   DMA_HANDLE       rxdma;        /* DMA channel handle for RX transfers */
   DMA_HANDLE       txdma;        /* DMA channel handle for TX transfers */
   sem_t            rxsem;        /* Wait for RX DMA to complete */
-  sem_t            txsem;        /* Wait for TX DMA to complete */
+  sem_t            txsem;        /* Wait for SPI TX completion */
   uint32_t         txccr;        /* DMA control register for TX transfers */
   uint32_t         rxccr;        /* DMA control register for RX transfers */
 #endif
@@ -1154,7 +1154,7 @@ static int spi_dmarxwait(struct stm32_spidev_s *priv)
  * Name: spi_dmatxwait
  *
  * Description:
- *   Wait for DMA to complete.
+ *   Wait for SPI TX completion or a TX DMA error.
  *
  ****************************************************************************/
 
@@ -1170,18 +1170,7 @@ static int spi_dmatxwait(struct stm32_spidev_s *priv)
       return OK;
     }
 
-  /* Enable TXC interrupt. This needs to be done after starting TX-dma AND
-   * when spi is enabled to avoid spurious TXC interrupt (ERRATA:
-   * "2.14.4 TXP interrupt occurring while SPI/I2Sdisabled")
-   * It is fine to enable this interrupt even if the transfer already did
-   * complete; in this case the irq will just fire right away
-   */
-
-  spi_modifyreg(priv, STM32_SPI_IER_OFFSET, 0, SPI_IER_EOTIE);
-
-  /* Take the semaphore (perhaps waiting).  If the result is zero, then the
-   * DMA must not really have completed???
-   */
+  /* The TX DMA callback arms the SPI completion interrupt. */
 
   do
     {
@@ -1194,6 +1183,11 @@ static int spi_dmatxwait(struct stm32_spidev_s *priv)
       DEBUGASSERT(ret == OK || ret == -ECANCELED);
     }
   while (priv->txresult == 0 && ret == OK);
+
+  if (ret == OK && (priv->txresult & DMA_STATUS_ERROR) != 0)
+    {
+      ret = -EIO;
+    }
 
   return ret;
 }
@@ -1297,6 +1291,37 @@ static void spi_dmarxsetup(struct stm32_spidev_s *priv,
 #endif
 
 /****************************************************************************
+ * Name: spi_dmatxcallback
+ ****************************************************************************/
+
+#ifdef CONFIG_STM32_SPI_DMA
+static void spi_dmatxcallback(DMA_HANDLE handle, uint8_t status, void *arg)
+{
+  struct stm32_spidev_s *priv = arg;
+
+  if ((status & DMA_STATUS_ERROR) != 0)
+    {
+      priv->txresult = status | 0x80;
+      nxsem_post(&priv->txsem);
+      return;
+    }
+
+  if ((status & DMA_STATUS_TCIF) == 0)
+    {
+      return;
+    }
+
+  /* EOTIE combines EOT, SUSP and TXC. Clear the latched flags before
+   * waiting for the FIFO and final shift register to become empty.
+   */
+
+  spi_putreg(priv, STM32_SPI_IFCR_OFFSET,
+             SPI_IFCR_SUSPC | SPI_IFCR_EOTC | SPI_IFCR_TXTFC);
+  spi_modifyreg(priv, STM32_SPI_IER_OFFSET, 0, SPI_IER_EOTIE);
+}
+#endif
+
+/****************************************************************************
  * Name: spi_dmatxsetup
  *
  * Description:
@@ -1374,6 +1399,7 @@ static void spi_dmarxstart(struct stm32_spidev_s *priv)
       return;
     }
 
+  nxsem_reset(&priv->rxsem, 0);
   priv->rxresult = 0;
   spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, 0, SPI_CFG1_RXDMAEN);
   stm32_dmastart(priv->rxdma, spi_dmarxcallback, priv, false);
@@ -1398,8 +1424,10 @@ static void spi_dmatxstart(struct stm32_spidev_s *priv)
       return;
     }
 
+  spi_modifyreg(priv, STM32_SPI_IER_OFFSET, SPI_IER_EOTIE, 0);
+  nxsem_reset(&priv->txsem, 0);
   priv->txresult = 0;
-  stm32_dmastart(priv->txdma, NULL, priv, false);
+  stm32_dmastart(priv->txdma, spi_dmatxcallback, priv, false);
   spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, 0, SPI_CFG1_TXDMAEN);
 }
 #endif
@@ -1465,6 +1493,28 @@ static inline int spi_enable(struct stm32_spidev_s *priv, bool state)
 
   return ret;
 }
+
+/****************************************************************************
+ * Name: spi_dmastart
+ ****************************************************************************/
+
+#ifdef CONFIG_STM32_SPI_DMA
+static void spi_dmastart(struct stm32_spidev_s *priv)
+{
+  irqstate_t flags;
+
+  /* A short TX DMA may finish before SPI starts. Defer its callback so
+   * the idle TXC flag cannot be mistaken for the end of the transfer.
+   */
+
+  flags = enter_critical_section();
+  spi_dmarxstart(priv);
+  spi_dmatxstart(priv);
+  spi_enable(priv, true);
+  spi_modifyreg(priv, STM32_SPI_CR1_OFFSET, 0, SPI_CR1_CSTART);
+  leave_critical_section(flags);
+}
+#endif
 
 /****************************************************************************
  * Name: spi_setfrequency
@@ -2051,6 +2101,7 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
     aligned_data(ARMV7M_DCACHE_LINESIZE);
   static const uint16_t txdummy = 0xffff;
   void *orig_rxbuffer = rxbuffer;
+  int ret;
 
   DEBUGASSERT(priv != NULL);
 
@@ -2195,10 +2246,7 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
         {
           /* No.. Start the DMAs then the SPI */
 
-          spi_dmarxstart(priv);
-          spi_dmatxstart(priv);
-          spi_enable(priv, true);
-          spi_modifyreg(priv, STM32_SPI_CR1_OFFSET, 0, SPI_CR1_CSTART);
+          spi_dmastart(priv);
         }
       else
         {
@@ -2209,16 +2257,29 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
 #else
       /* Start the DMAs then the SPI */
 
-      spi_dmarxstart(priv);
-      spi_dmatxstart(priv);
-      spi_enable(priv, true);
-      spi_modifyreg(priv, STM32_SPI_CR1_OFFSET, 0, SPI_CR1_CSTART);
+      spi_dmastart(priv);
 #endif
 
-      /* Then wait for each to complete */
+      /* Wait for TX first: a TX DMA error can also leave RX waiting for
+       * clocks that will never arrive.
+       */
 
-      spi_dmarxwait(priv);
-      spi_dmatxwait(priv);
+      ret = spi_dmatxwait(priv);
+      if (ret < 0)
+        {
+          spi_modifyreg(priv, STM32_SPI_IER_OFFSET, SPI_IER_EOTIE, 0);
+          stm32_dmastop(priv->txdma);
+          if (priv->config != SIMPLEX_TX)
+            {
+              stm32_dmastop(priv->rxdma);
+            }
+
+          spierr("ERROR: SPI TX failed: %d\n", ret);
+        }
+      else
+        {
+          spi_dmarxwait(priv);
+        }
 
       /* To close communication it is mandatory to follow these steps in
        * this order:
@@ -2231,8 +2292,8 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
 
       /* TX transmission must be completed before shutting down the SPI */
 
-      DEBUGASSERT(priv->config != SIMPLEX_RX ?
-                  (spi_getreg(priv, STM32_SPI_SR_OFFSET) & SPI_SR_TXC) : 1);
+      DEBUGASSERT(ret < 0 || priv->config == SIMPLEX_RX ||
+                  (spi_getreg(priv, STM32_SPI_SR_OFFSET) & SPI_SR_TXC) != 0);
 
       spi_enable(priv, false);
       spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, SPI_CFG1_TXDMAEN |
@@ -2249,7 +2310,7 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
 
       /* Second copy: Copy the DMA internal buffer to caller's buffer */
 
-      if (orig_rxbuffer && priv->rxbuf)
+      if (ret == OK && orig_rxbuffer != NULL && priv->rxbuf != NULL)
         {
           memcpy(orig_rxbuffer, priv->rxbuf, nbytes);
         }
@@ -2288,10 +2349,7 @@ static int spi_trigger(struct spi_dev_s *dev)
       return -EIO;
     }
 
-  spi_dmarxstart(priv);
-  spi_dmatxstart(priv);
-  spi_enable(priv, true);
-  spi_modifyreg(priv, STM32_SPI_CR1_OFFSET, 0, SPI_CR1_CSTART);
+  spi_dmastart(priv);
   return OK;
 #else
   return -ENOSYS;

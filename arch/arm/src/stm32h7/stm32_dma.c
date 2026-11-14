@@ -1837,7 +1837,7 @@ static int stm32_bdma_interrupt(int irq, void *context, void *arg)
     {
       /* Map to the SDMA status */
 
-      scrstatus  = (status & BDMA_CHAN_TEIF) ? DMA_STREAM_FEIF_BIT : 0;
+      scrstatus  = (status & BDMA_CHAN_TEIF) ? DMA_STREAM_TEIF_BIT : 0;
       scrstatus |= (status & BDMA_CHAN_TCIF) ? DMA_STREAM_TCIF_BIT : 0;
       scrstatus |= (status & BDMA_CHAN_HTIF) ? DMA_STREAM_HTIF_BIT : 0;
       dmachan->callback(dmachan, scrstatus, dmachan->arg);
